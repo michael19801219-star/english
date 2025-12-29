@@ -2,13 +2,15 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Question } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
 export const generateGrammarQuestions = async (count: number): Promise<Question[]> => {
+  // 每次调用时初始化，确保获取最新的 API Key
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  
   const prompt = `Generate ${count} professional high school level English grammar multiple-choice questions suitable for China's GaoKao (National College Entrance Examination). 
   Focus on common test points: Verb Tenses, Non-finite Verbs, Relative Clauses, Noun Clauses, Prepositions, and Conjunctions. 
   Each question must have exactly 4 options. 
-  Return a JSON array of objects.`;
+  Return a JSON array of objects.
+  The explanation must be in Chinese and very detailed.`;
 
   try {
     const response = await ai.models.generateContent({
