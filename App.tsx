@@ -1,5 +1,5 @@
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState } from 'react';
 import { AppState, Question, QuizResults } from './types';
 import { generateGrammarQuestions } from './services/geminiService';
 import HomeView from './components/HomeView';
@@ -20,8 +20,9 @@ const App: React.FC = () => {
       const newQuestions = await generateGrammarQuestions(count);
       setQuestions(newQuestions);
       setView(AppState.QUIZ);
-    } catch (error) {
-      alert('生成题目失败，请检查网络连接后重试。');
+    } catch (error: any) {
+      console.error("Start Quiz Error:", error);
+      alert(`生成失败: ${error.message}\n\n建议：1. 确认 Vercel 设置了 API_KEY 环境变量\n2. 确认 API Key 拥有 Gemini 2.0/3.0 访问权限\n3. 如果在国内访问，请确保网络环境正常。`);
       setView(AppState.HOME);
     }
   };

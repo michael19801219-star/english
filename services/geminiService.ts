@@ -3,8 +3,14 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { Question } from "../types";
 
 export const generateGrammarQuestions = async (count: number): Promise<Question[]> => {
-  // 每次调用时初始化，确保获取最新的 API Key
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = process.env.API_KEY;
+  
+  if (!apiKey || apiKey === "undefined") {
+    console.error("API_KEY is missing! Please check your Vercel Environment Variables.");
+    throw new Error("API密钥未配置，请在Vercel后台设置环境变量 API_KEY");
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
   
   const prompt = `Generate ${count} professional high school level English grammar multiple-choice questions suitable for China's GaoKao (National College Entrance Examination). 
   Focus on common test points: Verb Tenses, Non-finite Verbs, Relative Clauses, Noun Clauses, Prepositions, and Conjunctions. 
@@ -41,10 +47,13 @@ export const generateGrammarQuestions = async (count: number): Promise<Question[
       }
     });
 
-    const data = JSON.parse(response.text || "[]");
-    return data;
-  } catch (error) {
-    console.error("Failed to generate questions:", error);
-    throw error;
+    const text = response.text;
+    if (!text) throw new Error("AI 返回了空内容");
+    
+    return JSON.parse(text);
+  } catch (error: any) {
+    console.error("Gemini API Error:", error);
+    // 捕获 API 具体的错误信息并抛出
+    throw new Error(error?.message || "请求 AI 失败");
   }
 };
