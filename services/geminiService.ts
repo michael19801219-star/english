@@ -3,20 +3,18 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { Question } from "../types";
 
 export const generateGrammarQuestions = async (count: number): Promise<Question[]> => {
+  // 直接从 process.env.API_KEY 读取，系统会自动注入
   const apiKey = process.env.API_KEY;
   
   if (!apiKey || apiKey === "undefined") {
-    console.error("API_KEY is missing! Please check your Vercel Environment Variables.");
-    throw new Error("API密钥未配置，请在Vercel后台设置环境变量 API_KEY");
+    throw new Error("API_KEY_MISSING");
   }
 
   const ai = new GoogleGenAI({ apiKey });
   
-  const prompt = `Generate ${count} professional high school level English grammar multiple-choice questions suitable for China's GaoKao (National College Entrance Examination). 
-  Focus on common test points: Verb Tenses, Non-finite Verbs, Relative Clauses, Noun Clauses, Prepositions, and Conjunctions. 
-  Each question must have exactly 4 options. 
-  Return a JSON array of objects.
-  The explanation must be in Chinese and very detailed.`;
+  const prompt = `你是一位高考英语名师。请生成 ${count} 道难度适中的英语语法单选题（符合中国高考标准）。
+  涵盖核心考点：时态、非谓语、从句。
+  返回纯 JSON 格式。`;
 
   try {
     const response = await ai.models.generateContent({
@@ -31,15 +29,10 @@ export const generateGrammarQuestions = async (count: number): Promise<Question[
             properties: {
               id: { type: Type.STRING },
               question: { type: Type.STRING },
-              options: { 
-                type: Type.ARRAY, 
-                items: { type: Type.STRING },
-                minItems: 4,
-                maxItems: 4
-              },
-              answerIndex: { type: Type.INTEGER, description: "0-3 index of correct option" },
-              explanation: { type: Type.STRING, description: "Detailed explanation in Chinese" },
-              grammarPoint: { type: Type.STRING, description: "The specific grammar rule tested" }
+              options: { type: Type.ARRAY, items: { type: Type.STRING } },
+              answerIndex: { type: Type.INTEGER },
+              explanation: { type: Type.STRING },
+              grammarPoint: { type: Type.STRING }
             },
             required: ["id", "question", "options", "answerIndex", "explanation", "grammarPoint"]
           }
@@ -47,13 +40,9 @@ export const generateGrammarQuestions = async (count: number): Promise<Question[
       }
     });
 
-    const text = response.text;
-    if (!text) throw new Error("AI 返回了空内容");
-    
-    return JSON.parse(text);
+    return JSON.parse(response.text || "[]");
   } catch (error: any) {
     console.error("Gemini API Error:", error);
-    // 捕获 API 具体的错误信息并抛出
-    throw new Error(error?.message || "请求 AI 失败");
+    throw error;
   }
 };

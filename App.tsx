@@ -11,18 +11,24 @@ const App: React.FC = () => {
   const [view, setView] = useState<AppState>(AppState.HOME);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [results, setResults] = useState<QuizResults | null>(null);
-  const [loadingMsg, setLoadingMsg] = useState('正在为您准备高考语法秘籍...');
+  const [loadingMsg, setLoadingMsg] = useState('准备中...');
 
   const startQuiz = async (count: number) => {
     setView(AppState.LOADING);
     try {
-      setLoadingMsg('AI 老师正在根据考纲选题...');
+      setLoadingMsg('AI 老师正在命题...');
       const newQuestions = await generateGrammarQuestions(count);
       setQuestions(newQuestions);
       setView(AppState.QUIZ);
     } catch (error: any) {
-      console.error("Start Quiz Error:", error);
-      alert(`生成失败: ${error.message}\n\n建议：1. 确认 Vercel 设置了 API_KEY 环境变量\n2. 确认 API Key 拥有 Gemini 2.0/3.0 访问权限\n3. 如果在国内访问，请确保网络环境正常。`);
+      console.error("Start Error:", error);
+      let errorMsg = "生成失败，请重试。";
+      if (error.message === "API_KEY_MISSING") {
+        errorMsg = "API Key 未注入成功！请在 Vercel 重新 Deploy 您的项目。";
+      } else if (error.message?.includes("fetch")) {
+        errorMsg = "网络连接超时，请检查您的网络环境。";
+      }
+      alert(errorMsg);
       setView(AppState.HOME);
     }
   };
@@ -33,12 +39,7 @@ const App: React.FC = () => {
       if (ans === questions[idx].answerIndex) score++;
     });
 
-    setResults({
-      score,
-      total: questions.length,
-      answers: userAnswers,
-      questions
-    });
+    setResults({ score, total: questions.length, answers: userAnswers, questions });
     setView(AppState.RESULT);
   };
 
@@ -56,10 +57,6 @@ const App: React.FC = () => {
       {view === AppState.RESULT && results && (
         <ResultView results={results} onRestart={resetQuiz} />
       )}
-      
-      {/* Decorative BG element */}
-      <div className="fixed -bottom-24 -left-24 w-64 h-64 bg-indigo-100 rounded-full blur-3xl opacity-50 -z-10" />
-      <div className="fixed -top-24 -right-24 w-64 h-64 bg-blue-100 rounded-full blur-3xl opacity-50 -z-10" />
     </div>
   );
 };
