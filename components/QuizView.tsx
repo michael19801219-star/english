@@ -37,27 +37,33 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) =>
     }
   };
 
+  const triggerExit = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsExiting(true);
+  };
+
   return (
     <div className="flex-1 flex flex-col p-6 animate-fadeIn h-screen relative">
       {/* 自定义退出确认弹窗 - 替代 window.confirm */}
       {isExiting && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-6">
-          <div className="bg-white w-full rounded-[32px] p-8 shadow-2xl animate-fadeIn">
-            <div className="text-4xl mb-4 text-center">⚠️</div>
-            <h3 className="text-xl font-black text-gray-900 text-center mb-2">确定要中断训练吗？</h3>
-            <p className="text-gray-500 text-center text-sm mb-8">
-              当前的进度将无法保存，你需要重新开始测试。
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-md p-6">
+          <div className="bg-white w-full max-w-sm rounded-[40px] p-10 shadow-2xl animate-fadeIn text-center">
+            <div className="text-5xl mb-6">⚠️</div>
+            <h3 className="text-2xl font-black text-gray-900 mb-3">要退出练习吗？</h3>
+            <p className="text-gray-500 text-sm mb-10 leading-relaxed">
+              本次训练的进度将无法保存，<br/>建议完成测试再离开哦。
             </p>
-            <div className="space-y-3">
+            <div className="flex flex-col gap-3">
               <button 
                 onClick={onCancel}
-                className="w-full py-4 bg-red-500 text-white rounded-2xl font-black shadow-lg shadow-red-100 active:scale-95 transition-all"
+                className="w-full py-4.5 bg-red-500 text-white rounded-2xl font-black shadow-xl shadow-red-200 active:scale-95 transition-all"
               >
                 确定退出
               </button>
               <button 
                 onClick={() => setIsExiting(false)}
-                className="w-full py-4 bg-gray-100 text-gray-600 rounded-2xl font-bold active:scale-95 transition-all"
+                className="w-full py-4.5 bg-gray-100 text-gray-600 rounded-2xl font-bold active:scale-95 transition-all"
               >
                 继续练习
               </button>
@@ -77,8 +83,8 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) =>
             </span>
           </div>
           <button 
-            onClick={() => setIsExiting(true)}
-            className="flex items-center gap-1.5 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-500 rounded-full text-xs font-black transition-all active:scale-90"
+            onClick={triggerExit}
+            className="flex items-center gap-1.5 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-500 rounded-full text-xs font-black transition-all active:scale-90 border border-transparent"
           >
             <span>退出</span>
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
