@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { UserStats, Difficulty, GRAMMAR_POINTS } from '../types';
 
