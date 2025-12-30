@@ -101,7 +101,7 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview }) => 
               onClick={() => setShowPointsModal(true)}
               className="text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-full"
             >
-              修改设置 >
+              修改设置 &gt;
             </button>
           </div>
           <div className="flex flex-wrap gap-2">
