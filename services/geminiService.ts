@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { Question } from "../types";
+import { Question, Difficulty } from "../types";
 
 const getAI = () => {
   const apiKey = process.env.API_KEY;
@@ -24,22 +24,30 @@ const SCHEMA = {
   }
 };
 
-export const generateGrammarQuestions = async (count: number, targetPoints?: string[]): Promise<Question[]> => {
+export const generateGrammarQuestions = async (
+  count: number, 
+  targetPoints: string[], 
+  difficulty: Difficulty
+): Promise<Question[]> => {
   const ai = getAI();
   
-  let targetDesc = targetPoints && targetPoints.length > 0 
-    ? `特别针对以下语法弱项进行命题：${targetPoints.join('、')}。` 
-    : "涵盖时态、语态、非谓语、从句等高考核心考点。";
+  const difficultyMap: Record<Difficulty, string> = {
+    '简单': '基础高频考点，题干简短，干扰项特征明显。',
+    '中等': '标准高考难度，包含综合考点和适度干扰。',
+    '较难': '高难模拟难度，题干较长且包含复杂从句，考查细微语法区别。'
+  };
 
-  const prompt = `你是一位高考英语名师。请生成 ${count} 道英语语法单选题。
+  const pointsDesc = targetPoints.length > 0 
+    ? `特别针对以下语法点进行命题：${targetPoints.join('、')}。` 
+    : "涵盖高考全考点。";
+
+  const prompt = `你是一位高考英语命题专家。请生成 ${count} 道英语语法单选题。
   要求：
-  1. 难度符合中国高考标准。
-  2. 每道题必须有一个明确的考点。
-  3. ${targetDesc}
-  4. 重点：解析 (explanation) 部分必须使用中文，且逻辑清晰，指出考点、句意分析及为什么其他选项错误。
-  5. 语法考点 (grammarPoint) 也请使用中文描述（例如：定语从句、现在完成时）。
-  
-  请直接返回符合 JSON 格式的数据。`;
+  1. 难度设定为：${difficulty}。要求：${difficultyMap[difficulty]}
+  2. ${pointsDesc}
+  3. 考点 (grammarPoint) 必须使用中文。
+  4. 解析 (explanation) 必须包含：【考点直击】、【句意翻译】、【选项剖析】。
+  5. 返回纯 JSON 格式。`;
 
   try {
     const response = await ai.models.generateContent({
@@ -54,7 +62,6 @@ export const generateGrammarQuestions = async (count: number, targetPoints?: str
     return JSON.parse(response.text || "[]");
   } catch (error: any) {
     console.error("Gemini Error:", error);
-    if (error.message?.includes("fetch")) throw new Error("NETWORK_ERROR");
     throw error;
   }
 };

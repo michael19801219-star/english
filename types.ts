@@ -8,12 +8,14 @@ export interface Question {
   grammarPoint: string;
 }
 
+export type Difficulty = '简单' | '中等' | '较难';
+
 export enum AppState {
   HOME = 'HOME',
   LOADING = 'LOADING',
   QUIZ = 'QUIZ',
   RESULT = 'RESULT',
-  CONSOLIDATING = 'CONSOLIDATING' // 巩固模式
+  REVIEW = 'REVIEW' // 新增错题回顾模式
 }
 
 export interface QuizResults {
@@ -24,6 +26,18 @@ export interface QuizResults {
   wrongGrammarPoints: string[];
 }
 
-export interface UserStats {
-  wrongCounts: Record<string, number>; // 记录语法点 -> 错误次数
+export interface WrongQuestion extends Question {
+  userAnswerIndex: number;
+  timestamp: number;
 }
+
+export interface UserStats {
+  wrongCounts: Record<string, number>;
+  wrongHistory: WrongQuestion[]; // 记录具体的错题内容
+}
+
+export const GRAMMAR_POINTS = [
+  '时态语态', '定语从句', '名词性从句', '状语从句', 
+  '非谓语动词', '情态动词与虚拟语气', '特殊句式', '主谓一致', 
+  '介词冠词', '代词与形容词副词'
+];

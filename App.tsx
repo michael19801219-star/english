@@ -1,49 +1,46 @@
+
 import React, { useState, useEffect } from 'react';
-import { AppState, Question, QuizResults, UserStats } from './types';
+import { AppState, Question, QuizResults, UserStats, Difficulty, WrongQuestion } from './types';
 import { generateGrammarQuestions } from './services/geminiService';
 import HomeView from './components/HomeView';
 import QuizView from './components/QuizView';
 import ResultView from './components/ResultView';
 import LoadingView from './components/LoadingView';
+import ReviewView from './components/ReviewView';
 
 const App: React.FC = () => {
   const [view, setView] = useState<AppState>(AppState.HOME);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [results, setResults] = useState<QuizResults | null>(null);
   const [loadingMsg, setLoadingMsg] = useState('');
-  const [userStats, setUserStats] = useState<UserStats>({ wrongCounts: {} });
+  const [userStats, setUserStats] = useState<UserStats>({ wrongCounts: {}, wrongHistory: [] });
 
-  // 初始化加载本地统计
   useEffect(() => {
-    const saved = localStorage.getItem('gaokao_stats');
+    const saved = localStorage.getItem('gaokao_stats_v2');
     if (saved) setUserStats(JSON.parse(saved));
   }, []);
 
-  const saveStats = (wrongPoints: string[]) => {
+  const saveStats = (wrongPoints: string[], wrongQuestions: WrongQuestion[]) => {
     const newStats = { ...userStats };
+    
+    // 更新错题统计
     wrongPoints.forEach(pt => {
       newStats.wrongCounts[pt] = (newStats.wrongCounts[pt] || 0) + 1;
     });
+
+    // 将新错题加入历史，保持最近50道
+    newStats.wrongHistory = [...wrongQuestions, ...newStats.wrongHistory].slice(0, 50);
+
     setUserStats(newStats);
-    localStorage.setItem('gaokao_stats', JSON.stringify(newStats));
+    localStorage.setItem('gaokao_stats_v2', JSON.stringify(newStats));
   };
 
-  const startQuiz = async (count: number, targeted: boolean = false) => {
+  const startQuiz = async (count: number, difficulty: Difficulty, points: string[]) => {
     setView(AppState.LOADING);
-    setLoadingMsg(targeted ? '针对薄弱环节组卷中...' : 'AI 老师正在命题...');
+    setLoadingMsg(`AI 正在为你生成 ${difficulty} 难度的试卷...`);
     
     try {
-      let targets: string[] = [];
-      if (targeted) {
-        // 取错误频率最高的前3个语法点
-        targets = Object.entries(userStats.wrongCounts)
-          // Fix: Ensure the values from Object.entries are treated as numbers for the sort subtraction
-          .sort((a, b) => (b[1] as number) - (a[1] as number))
-          .slice(0, 3)
-          .map(([pt]) => pt);
-      }
-
-      const newQuestions = await generateGrammarQuestions(count, targets);
+      const newQuestions = await generateGrammarQuestions(count, points, difficulty);
       setQuestions(newQuestions);
       setView(AppState.QUIZ);
     } catch (error: any) {
@@ -55,42 +52,72 @@ const App: React.FC = () => {
   const finishQuiz = (userAnswers: number[]) => {
     let score = 0;
     const wrongPoints: string[] = [];
+    const newWrongEntries: WrongQuestion[] = [];
+
     userAnswers.forEach((ans, idx) => {
       if (ans === questions[idx].answerIndex) {
         score++;
       } else {
         wrongPoints.push(questions[idx].grammarPoint);
+        newWrongEntries.push({
+          ...questions[idx],
+          userAnswerIndex: ans,
+          timestamp: Date.now()
+        });
       }
     });
 
-    if (wrongPoints.length > 0) saveStats(wrongPoints);
-    setResults({ score, total: questions.length, answers: userAnswers, questions, wrongGrammarPoints: Array.from(new Set(wrongPoints)) });
+    if (newWrongEntries.length > 0) saveStats(wrongPoints, newWrongEntries);
+    
+    setResults({ 
+      score, 
+      total: questions.length, 
+      answers: userAnswers, 
+      questions, 
+      wrongGrammarPoints: Array.from(new Set(wrongPoints)) 
+    });
     setView(AppState.RESULT);
   };
 
   const startConsolidation = async () => {
     if (!results || results.wrongGrammarPoints.length === 0) return;
     setView(AppState.LOADING);
-    setLoadingMsg('正在根据错题生成巩固练习...');
+    setLoadingMsg('针对刚才的错点生成专项练习...');
     try {
-      // 针对刚才错的语法点，每个点出一道新题
-      const newQuestions = await generateGrammarQuestions(results.wrongGrammarPoints.length, results.wrongGrammarPoints);
+      const newQuestions = await generateGrammarQuestions(results.wrongGrammarPoints.length, results.wrongGrammarPoints, '中等');
       setQuestions(newQuestions);
       setResults(null);
       setView(AppState.QUIZ);
     } catch (error) {
-      alert('巩固练习生成失败');
+      alert('生成失败');
       setView(AppState.HOME);
     }
   };
 
+  const clearHistory = () => {
+    if (confirm('确定要清空错题本吗？')) {
+      const reset = { wrongCounts: {}, wrongHistory: [] };
+      setUserStats(reset);
+      localStorage.setItem('gaokao_stats_v2', JSON.stringify(reset));
+    }
+  };
+
+  const handleCancelQuiz = () => {
+    // 逻辑简化：直接执行返回主页，确认交互交由 QuizView 内部处理
+    setView(AppState.HOME);
+    setQuestions([]);
+  };
+
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col max-w-md mx-auto relative overflow-hidden shadow-xl">
-      {view === AppState.HOME && <HomeView onStart={startQuiz} stats={userStats} />}
-      {view === AppState.LOADING && <LoadingView message={loadingMsg} />}
-      {view === AppState.QUIZ && <QuizView questions={questions} onFinish={finishQuiz} />}
+    <div className="min-h-screen bg-gray-50 flex flex-col max-w-md mx-auto relative overflow-hidden shadow-2xl">
+      {view === AppState.HOME && <HomeView onStart={startQuiz} stats={userStats} onGoToReview={() => setView(AppState.REVIEW)} />}
+      {view === AppState.LOADING && <LoadingView message={loadingMsg} onCancel={() => setView(AppState.HOME)} />}
+      {view === AppState.QUIZ && <QuizView questions={questions} onFinish={finishQuiz} onCancel={handleCancelQuiz} />}
       {view === AppState.RESULT && results && (
         <ResultView results={results} onRestart={() => setView(AppState.HOME)} onConsolidate={startConsolidation} />
+      )}
+      {view === AppState.REVIEW && (
+        <ReviewView history={userStats.wrongHistory} onBack={() => setView(AppState.HOME)} onClear={clearHistory} />
       )}
     </div>
   );
