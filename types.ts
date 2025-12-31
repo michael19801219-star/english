@@ -15,7 +15,7 @@ export enum AppState {
   LOADING = 'LOADING',
   QUIZ = 'QUIZ',
   RESULT = 'RESULT',
-  REVIEW = 'REVIEW' // 新增错题回顾模式
+  REVIEW = 'REVIEW'
 }
 
 export interface QuizResults {
@@ -33,7 +33,12 @@ export interface WrongQuestion extends Question {
 
 export interface UserStats {
   wrongCounts: Record<string, number>;
-  wrongHistory: WrongQuestion[]; // 记录具体的错题内容
+  wrongHistory: WrongQuestion[];
+}
+
+export interface ChatMessage {
+  role: 'user' | 'model';
+  content: string;
 }
 
 export const GRAMMAR_POINTS = [

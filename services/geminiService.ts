@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { Question, Difficulty } from "../types";
+import { Question, Difficulty, ChatMessage } from "../types";
 
 const getAI = () => {
   const apiKey = process.env.API_KEY;
@@ -33,7 +33,7 @@ export const generateGrammarQuestions = async (
   
   const difficultyMap: Record<Difficulty, string> = {
     '简单': '基础高频考点，题干简短，干扰项特征明显。',
-    '中等': '标准高考难度，包含综合考点和适度干扰。',
+    '中等': '标准高考难度，包含综合考点 and 适度干扰。',
     '较难': '高难模拟难度，题干较长且包含复杂从句，考查细微语法区别。'
   };
 
@@ -63,5 +63,46 @@ export const generateGrammarQuestions = async (
   } catch (error: any) {
     console.error("Gemini Error:", error);
     throw error;
+  }
+};
+
+export const askFollowUpQuestion = async (
+  questionContext: Question,
+  history: ChatMessage[],
+  userQuery: string
+): Promise<string> => {
+  const ai = getAI();
+  
+  // 构建带有历史上下文的 prompt
+  let conversationContext = "";
+  if (history.length > 0) {
+    conversationContext = "前面的对话内容：\n" + history.map(m => `${m.role === 'user' ? '学生' : '老师'}: ${m.content}`).join('\n') + "\n";
+  }
+
+  const contextPrompt = `
+    学生正在做一道英语语法题：
+    题目：${questionContext.question}
+    选项：${questionContext.options.join(', ')}
+    正确答案：${questionContext.options[questionContext.answerIndex]}
+    标准解析：${questionContext.explanation}
+
+    ${conversationContext}
+    学生的当前新疑问是：${userQuery}
+
+    请作为资深英语老师，针对该疑问提供通俗易懂、逻辑清晰的解答。
+    如果是针对之前的回答进行的追问，请保持逻辑连贯。
+    字数要求：150字以内。
+    语言：中文。
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: contextPrompt
+    });
+    return response.text || "抱歉，老师刚才走神了，请再问一次。";
+  } catch (error: any) {
+    console.error("AI Tutor Error:", error);
+    throw new Error("提问失败，请检查网络连接。");
   }
 };

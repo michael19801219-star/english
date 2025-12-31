@@ -22,15 +22,10 @@ const App: React.FC = () => {
 
   const saveStats = (wrongPoints: string[], wrongQuestions: WrongQuestion[]) => {
     const newStats = { ...userStats };
-    
-    // 更新错题统计
     wrongPoints.forEach(pt => {
       newStats.wrongCounts[pt] = (newStats.wrongCounts[pt] || 0) + 1;
     });
-
-    // 将新错题加入历史，保持最近50道
     newStats.wrongHistory = [...wrongQuestions, ...newStats.wrongHistory].slice(0, 50);
-
     setUserStats(newStats);
     localStorage.setItem('gaokao_stats_v2', JSON.stringify(newStats));
   };
@@ -38,7 +33,6 @@ const App: React.FC = () => {
   const startQuiz = async (count: number, difficulty: Difficulty, points: string[]) => {
     setView(AppState.LOADING);
     setLoadingMsg(`AI 正在为你生成 ${difficulty} 难度的试卷...`);
-    
     try {
       const newQuestions = await generateGrammarQuestions(count, points, difficulty);
       setQuestions(newQuestions);
@@ -79,21 +73,6 @@ const App: React.FC = () => {
     setView(AppState.RESULT);
   };
 
-  const startConsolidation = async () => {
-    if (!results || results.wrongGrammarPoints.length === 0) return;
-    setView(AppState.LOADING);
-    setLoadingMsg('针对刚才的错点生成专项练习...');
-    try {
-      const newQuestions = await generateGrammarQuestions(results.wrongGrammarPoints.length, results.wrongGrammarPoints, '中等');
-      setQuestions(newQuestions);
-      setResults(null);
-      setView(AppState.QUIZ);
-    } catch (error) {
-      alert('生成失败');
-      setView(AppState.HOME);
-    }
-  };
-
   const clearHistory = () => {
     if (confirm('确定要清空错题本吗？')) {
       const reset = { wrongCounts: {}, wrongHistory: [] };
@@ -103,7 +82,6 @@ const App: React.FC = () => {
   };
 
   const handleCancelQuiz = () => {
-    // 逻辑简化：直接执行返回主页，确认交互交由 QuizView 内部处理
     setView(AppState.HOME);
     setQuestions([]);
   };
@@ -114,7 +92,7 @@ const App: React.FC = () => {
       {view === AppState.LOADING && <LoadingView message={loadingMsg} onCancel={() => setView(AppState.HOME)} />}
       {view === AppState.QUIZ && <QuizView questions={questions} onFinish={finishQuiz} onCancel={handleCancelQuiz} />}
       {view === AppState.RESULT && results && (
-        <ResultView results={results} onRestart={() => setView(AppState.HOME)} onConsolidate={startConsolidation} />
+        <ResultView results={results} onRestart={() => setView(AppState.HOME)} onConsolidate={() => {}} />
       )}
       {view === AppState.REVIEW && (
         <ReviewView history={userStats.wrongHistory} onBack={() => setView(AppState.HOME)} onClear={clearHistory} />
