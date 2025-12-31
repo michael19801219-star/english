@@ -9,24 +9,44 @@ interface QuizViewProps {
   onCancel: () => void;
 }
 
-// 音频工具
-function decodeBase64(base64: string) {
-  const binaryString = atob(base64);
-  const bytes = new Uint8Array(binaryString.length);
-  for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
+// 健壮的 Base64 解码器
+function decodeBase64(base64: string): Uint8Array {
+  try {
+    const binaryString = atob(base64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes;
+  } catch (e) {
+    console.error("Base64 decode failed:", e);
+    return new Uint8Array(0);
   }
-  return bytes;
 }
 
-async function decodeAudioData(data: Uint8Array, ctx: AudioContext, sampleRate: number): Promise<AudioBuffer> {
-  const dataInt16 = new Int16Array(data.buffer);
-  const buffer = ctx.createBuffer(1, dataInt16.length, sampleRate);
-  const channelData = buffer.getChannelData(0);
-  for (let i = 0; i < dataInt16.length; i++) {
-    channelData[i] = dataInt16[i] / 32768.0;
+// 专业的 PCM 音频解码器
+async function decodeAudioData(data: Uint8Array, ctx: AudioContext, sampleRate: number): Promise<AudioBuffer | null> {
+  if (data.length < 2) return null;
+
+  try {
+    // 确保字节对齐为 2 (PCM 16-bit)
+    const length = Math.floor(data.byteLength / 2) * 2;
+    const alignedData = data.byteOffset % 2 === 0 
+      ? data.buffer.slice(data.byteOffset, data.byteOffset + length)
+      : data.slice(0, length).buffer;
+
+    const dataInt16 = new Int16Array(alignedData);
+    const buffer = ctx.createBuffer(1, dataInt16.length, sampleRate);
+    const channelData = buffer.getChannelData(0);
+    
+    for (let i = 0; i < dataInt16.length; i++) {
+      channelData[i] = dataInt16[i] / 32768.0;
+    }
+    return buffer;
+  } catch (e) {
+    console.error("PCM decoding failed:", e);
+    return null;
   }
-  return buffer;
 }
 
 const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) => {
@@ -47,7 +67,6 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) =>
   const audioContextRef = useRef<AudioContext | null>(null);
   const recognitionRef = useRef<any>(null);
   
-  // 核心控制引用
   const audioCacheRef = useRef<Map<string, AudioBuffer>>(new Map());
   const activeSourcesRef = useRef<AudioBufferSourceNode[]>([]);
   const nextStartTimeRef = useRef<number>(0);
@@ -80,7 +99,7 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) =>
   const stopAllAudio = () => {
     stopRequestedRef.current = true;
     activeSourcesRef.current.forEach(source => {
-      try { source.stop(); } catch (e) {}
+      try { source.onended = null; source.stop(); } catch (e) {}
     });
     activeSourcesRef.current = [];
     nextStartTimeRef.current = 0;
@@ -88,25 +107,24 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) =>
     setIsTTSLoading(false);
   };
 
-  /**
-   * 增强型分片算法：
-   * 1. 按句末标点拆分
-   * 2. 如果单句超过 50 字，寻找逗号进一步拆分，确保每个分片都极快。
-   */
   const splitIntoOptimalChunks = (text: string): string[] => {
+    if (!text) return [];
+    // 基础切分
     const initialSegments = text.split(/([.?!。？！\n]+)/);
     const result: string[] = [];
     
     for (let i = 0; i < initialSegments.length; i += 2) {
       let s = (initialSegments[i] || "") + (initialSegments[i + 1] || "");
-      if (!s.trim()) continue;
+      // 过滤掉只有标点或太短的无效片段
+      if (!s.trim() || !/[a-zA-Z\u4e00-\u9fa5]/.test(s)) continue;
 
-      // 如果单句超过 50 个字，再次按逗号、分号拆分
       if (s.length > 50) {
         const subSegments = s.split(/([,;，；])/);
         for (let j = 0; j < subSegments.length; j += 2) {
           const sub = (subSegments[j] || "") + (subSegments[j + 1] || "");
-          if (sub.trim()) result.push(sub.trim());
+          if (sub.trim() && /[a-zA-Z\u4e00-\u9fa5]/.test(sub)) {
+            result.push(sub.trim());
+          }
         }
       } else {
         result.push(s.trim());
@@ -125,58 +143,69 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) =>
     stopRequestedRef.current = false;
     setPlayingMsgIdx(msgIdx);
     
-    if (!audioContextRef.current) {
-      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-    }
-    
-    const ctx = audioContextRef.current;
-    if (ctx.state === 'suspended') await ctx.resume();
-
-    const chunks = splitIntoOptimalChunks(fullText);
-    nextStartTimeRef.current = ctx.currentTime;
-    setIsTTSLoading(true);
-
-    const processChunk = async (text: string, index: number) => {
-      try {
-        let buffer: AudioBuffer;
-        if (audioCacheRef.current.has(text)) {
-          buffer = audioCacheRef.current.get(text)!;
-        } else {
-          const base64 = await generateTTS(text);
-          const bytes = decodeBase64(base64);
-          buffer = await decodeAudioData(bytes, ctx, 24000);
-          audioCacheRef.current.set(text, buffer);
-        }
-
-        if (stopRequestedRef.current) return;
-
-        // 一旦第一包音频就位，立即关闭加载状态开启朗读提示
-        if (index === 0) setIsTTSLoading(false);
-
-        const source = ctx.createBufferSource();
-        source.buffer = buffer;
-        source.connect(ctx.destination);
-        
-        const startTime = Math.max(nextStartTimeRef.current, ctx.currentTime);
-        source.start(startTime);
-        
-        nextStartTimeRef.current = startTime + buffer.duration;
-        activeSourcesRef.current.push(source);
-
-        source.onended = () => {
-          activeSourcesRef.current = activeSourcesRef.current.filter(s => s !== source);
-          if (activeSourcesRef.current.length === 0 && !stopRequestedRef.current) {
-            setPlayingMsgIdx(null);
-          }
-        };
-      } catch (err) {
-        console.error("Chunk TTS error:", err);
-        if (index === 0) setIsTTSLoading(false);
+    try {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
       }
-    };
+      const ctx = audioContextRef.current;
+      if (ctx.state === 'suspended') await ctx.resume();
 
-    // 并发请求所有小分片（由于每个分片都控制在50字内，第一个分片将极速返回）
-    chunks.forEach((chunk, i) => processChunk(chunk, i));
+      const chunks = splitIntoOptimalChunks(fullText);
+      if (chunks.length === 0) {
+        setPlayingMsgIdx(null);
+        return;
+      }
+
+      nextStartTimeRef.current = ctx.currentTime;
+      setIsTTSLoading(true);
+
+      const processChunk = async (text: string, index: number) => {
+        try {
+          let buffer: AudioBuffer | null = null;
+          if (audioCacheRef.current.has(text)) {
+            buffer = audioCacheRef.current.get(text)!;
+          } else {
+            const base64 = await generateTTS(text);
+            if (!base64) throw new Error("Empty TTS response");
+            const bytes = decodeBase64(base64);
+            buffer = await decodeAudioData(bytes, ctx, 24000);
+            if (buffer) audioCacheRef.current.set(text, buffer);
+          }
+
+          if (stopRequestedRef.current || !buffer) return;
+
+          if (index === 0) setIsTTSLoading(false);
+
+          const source = ctx.createBufferSource();
+          source.buffer = buffer;
+          source.connect(ctx.destination);
+          
+          const startTime = Math.max(nextStartTimeRef.current, ctx.currentTime);
+          source.start(startTime);
+          
+          nextStartTimeRef.current = startTime + buffer.duration;
+          activeSourcesRef.current.push(source);
+
+          source.onended = () => {
+            activeSourcesRef.current = activeSourcesRef.current.filter(s => s !== source);
+            if (activeSourcesRef.current.length === 0 && !stopRequestedRef.current) {
+              setPlayingMsgIdx(null);
+            }
+          };
+        } catch (err) {
+          console.error(`Chunk ${index} error:`, err);
+          if (index === 0) setIsTTSLoading(false);
+          // 如果只有这一个分片且出错了，重置 UI
+          if (chunks.length === 1) setPlayingMsgIdx(null);
+        }
+      };
+
+      chunks.forEach((chunk, i) => processChunk(chunk, i));
+    } catch (e) {
+      console.error("TTS System Error:", e);
+      setIsTTSLoading(false);
+      setPlayingMsgIdx(null);
+    }
   };
 
   const handleAskTutor = async () => {
@@ -190,13 +219,14 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) =>
       const response = await askFollowUpQuestion(questions[currentIndex], chatHistory, query);
       setChatHistory(prev => [...prev, { role: 'model', content: response }]);
       
-      // 预热：静默拉取首个 50 字分片
+      // 预热首包
       const chunks = splitIntoOptimalChunks(response);
       if (chunks[0]) {
-        generateTTS(chunks[0]).then(base64 => {
+        generateTTS(chunks[0]).then(async base64 => {
+           if (!base64) return;
            if (!audioContextRef.current) audioContextRef.current = new AudioContext();
-           decodeAudioData(decodeBase64(base64), audioContextRef.current, 24000)
-             .then(buf => audioCacheRef.current.set(chunks[0], buf));
+           const buf = await decodeAudioData(decodeBase64(base64), audioContextRef.current, 24000);
+           if (buf) audioCacheRef.current.set(chunks[0], buf);
         }).catch(() => {});
       }
     } catch (err: any) {
