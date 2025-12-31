@@ -81,7 +81,6 @@ const App: React.FC = () => {
 
   const handleConsolidate = () => {
     if (results && results.wrongGrammarPoints.length > 0) {
-      // 默认针对错题语法点生成 10 道中等难度的题目进行强化
       startQuiz(10, '中等', results.wrongGrammarPoints);
     }
   };
@@ -139,23 +138,31 @@ const App: React.FC = () => {
         />
       )}
 
-      {/* 配额超限提示弹窗 */}
+      {/* 配额超限提示弹窗 - 优化版 */}
       {showQuotaModal && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm p-6 animate-fadeIn">
           <div className="bg-white w-full max-w-xs rounded-[32px] p-8 shadow-2xl text-center">
-            <div className="text-4xl mb-4">⏳</div>
-            <h3 className="text-xl font-black text-gray-900 mb-2">服务暂时繁忙</h3>
-            <p className="text-gray-500 text-xs leading-relaxed mb-6">
-              由于当前访问量较大，请求频率已达上限。请稍等 1 分钟后再尝试。
-            </p>
-            <div className="flex flex-col gap-3">
-              <button 
-                onClick={() => setShowQuotaModal(false)}
-                className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black shadow-lg shadow-indigo-100"
-              >
-                我知道了
-              </button>
+            <div className="text-4xl mb-4">📊</div>
+            <h3 className="text-xl font-black text-gray-900 mb-2">配额使用提醒</h3>
+            <div className="text-left space-y-3 mb-6">
+              <div className="p-3 bg-indigo-50 rounded-xl border border-indigo-100">
+                 <p className="text-[11px] font-bold text-indigo-700 mb-1">频率限制 (RPM)</p>
+                 <p className="text-[10px] text-indigo-600/70 leading-relaxed">免费版每分钟支持15次请求。若刚操作频繁，请等待1分钟重试。</p>
+              </div>
+              <div className="p-3 bg-amber-50 rounded-xl border border-amber-100">
+                 <p className="text-[11px] font-bold text-amber-700 mb-1">每日总量 (RPD)</p>
+                 <p className="text-[10px] text-amber-600/70 leading-relaxed">每日上限为1500次。若持续报错，请明日再试。</p>
+              </div>
+              <p className="text-[10px] text-gray-400 text-center font-medium italic">
+                提示：API不支持代码查询剩余量，请在 Google AI Studio 后台查看具体数值。
+              </p>
             </div>
+            <button 
+              onClick={() => setShowQuotaModal(false)}
+              className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black shadow-lg shadow-indigo-100 active:scale-95 transition-transform"
+            >
+              返回主页
+            </button>
           </div>
         </div>
       )}

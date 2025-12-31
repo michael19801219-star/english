@@ -151,7 +151,7 @@ export const getGrammarDeepDive = async (
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-2.5-flash-lite-latest",
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -160,8 +160,10 @@ export const getGrammarDeepDive = async (
     });
 
     return JSON.parse(response.text || "{}");
-  } catch (error) {
-    console.error("Failed to generate deep dive", error);
+  } catch (error: any) {
+    if (error.message?.includes('429') || error.message?.includes('quota')) {
+      throw new Error("QUOTA_EXCEEDED");
+    }
     throw error;
   }
 };
