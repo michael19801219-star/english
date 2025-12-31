@@ -76,8 +76,14 @@ export const generateGrammarQuestions = async (
   return withRetry(async () => {
     const ai = new GoogleGenAI({ apiKey });
     const pointsDesc = targetPoints.length > 0 ? `专项考点：${targetPoints.join('、')}。` : "涵盖高中核心考点。";
-    // 明确要求中文解析
-    const prompt = `你是高考英语专家。请生成 ${count} 道单项填空题，难度：${difficulty}。${pointsDesc} 要求：符合高考命题逻辑，请务必使用中文提供详尽的解析且含翻译。返回标准 JSON 数组。`;
+    
+    // 明确要求中文解析，并增加答案均衡性的指令
+    const prompt = `你是高考英语专家。请生成 ${count} 道单项填空题，难度：${difficulty}。${pointsDesc} 
+    要求：
+    1. 符合高考命题逻辑。
+    2. 请务必使用中文提供详尽的解析且含翻译。
+    3. 特别注意：确保正确答案（answerIndex）在 0, 1, 2, 3 (即 A, B, C, D) 之间分布均衡，严禁所有题目或大部分题目的答案都集中在同一个选项位置。
+    返回标准 JSON 数组。`;
 
     const response = await ai.models.generateContent({
       model: TARGET_MODEL,
@@ -85,7 +91,7 @@ export const generateGrammarQuestions = async (
       config: {
         responseMimeType: "application/json",
         responseSchema: SCHEMA,
-        temperature: 0.7
+        temperature: 0.8 // 稍微调高温度有助于答案分布的随机性
       }
     });
     return JSON.parse(response.text || "[]");
