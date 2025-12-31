@@ -108,14 +108,15 @@ export const askFollowUpQuestion = async (
 export const generateTTS = async (text: string): Promise<string> => {
   const ai = getAI();
   try {
+    // 移除复杂的语气指令，直接输入文本可以让模型更早开始生成音频流
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash-preview-tts",
-      contents: [{ parts: [{ text: `请用温和清晰的中文朗读：${text}` }] }],
+      contents: [{ parts: [{ text: text }] }],
       config: {
         responseModalities: [Modality.AUDIO],
         speechConfig: {
           voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: 'Kore' } // 'Kore' 是非常适合教学的清脆女声
+            prebuiltVoiceConfig: { voiceName: 'Kore' } 
           }
         }
       }
