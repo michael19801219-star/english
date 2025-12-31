@@ -34,8 +34,7 @@ async function withRetry<T>(
 }
 
 /**
- * 用户明确要求使用 2.5 Lite 模型 ('gemini-flash-lite-latest')
- * 该模型在保持高效推理的同时，更适合移动端轻量级应用。
+ * 强制使用 2.5 Lite 模型 ('gemini-flash-lite-latest')
  */
 const TEXT_MODEL = 'gemini-flash-lite-latest';
 

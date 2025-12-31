@@ -57,10 +57,11 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onGoT
     .map(entry => entry[0]);
 
   return (
-    <div className="flex-1 flex flex-col bg-gray-50 animate-fadeIn relative">
+    <div className="flex-1 flex flex-col bg-gray-50 animate-fadeIn h-full overflow-hidden">
       <div className="absolute top-[-80px] left-[-40px] w-72 h-72 bg-indigo-200 rounded-full blur-[90px] opacity-30 -z-10"></div>
       
-      <div className="flex-1 overflow-y-auto px-6 pb-40 no-scrollbar">
+      {/* 内容滚动区域 */}
+      <div className="flex-1 overflow-y-auto px-6 no-scrollbar pb-10">
         <header className="py-8 flex justify-between items-start">
           <div className="flex flex-col">
             <span className="text-[10px] font-black text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-md uppercase mb-1">周琮钦专属定制版</span>
@@ -137,7 +138,8 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onGoT
         </div>
       </div>
 
-      <footer className="absolute bottom-0 left-0 right-0 p-6 z-10 bg-gradient-to-t from-gray-50 via-gray-50 to-transparent">
+      {/* 固定底部的操作栏 */}
+      <footer className="p-6 bg-white border-t border-gray-100 safe-area-bottom shadow-[0_-10px_30px_-10px_rgba(0,0,0,0.05)]">
         <button onClick={() => onStart(count, difficulty, selectedPoints)} className="w-full bg-indigo-600 text-white py-5 rounded-[28px] font-black text-lg shadow-xl active:scale-95 transition-all">🚀 启动练习</button>
       </footer>
 
