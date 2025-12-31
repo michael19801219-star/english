@@ -5,24 +5,31 @@ import { Question, Difficulty, ChatMessage, WrongQuestion } from "../types";
 
 const getAI = () => {
   const apiKey = process.env.API_KEY;
-  if (!apiKey || apiKey === "undefined") throw new Error("API_KEY_MISSING");
+  if (!apiKey || apiKey === "undefined" || apiKey === "") throw new Error("API_KEY_MISSING");
   return new GoogleGenAI({ apiKey });
 };
 
-// 辅助函数：延迟执行
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-// 带有自动重试机制的请求封装
 async function withRetry<T>(fn: () => Promise<T>, retries = 2): Promise<T> {
   try {
     return await fn();
   } catch (error: any) {
-    const isQuotaError = error.message?.includes('429') || error.message?.includes('quota');
-    if (isQuotaError && retries > 0) {
-      // 遇到配额限制，等待时间随重试次数递增 (2s, 5s)
-      const waitTime = retries === 2 ? 2000 : 5000;
-      await delay(waitTime);
-      return withRetry(fn, retries - 1);
+    const errorStr = JSON.stringify(error).toLowerCase();
+    const isQuotaError = errorStr.includes('429') || 
+                        errorStr.includes('quota') || 
+                        errorStr.includes('exhausted') ||
+                        (error.message && error.message.includes('429'));
+
+    if (isQuotaError) {
+      if (retries > 0) {
+        // 遇到配额限制，增加等待时间 (3s, 7s)
+        const waitTime = retries === 2 ? 3000 : 7000;
+        await delay(waitTime);
+        return withRetry(fn, retries - 1);
+      }
+      // 重试次数用完，抛出统一的配额错误
+      throw new Error("QUOTA_EXCEEDED");
     }
     throw error;
   }
@@ -92,7 +99,7 @@ export const getGrammarDeepDive = async (
     const prompt = `分析考点“${pointName}”。错题参考：${wrongQuestions.map(q => q.question).join('|')}。返回核心逻辑、错因、3条Tips的JSON。`;
     
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-lite-latest",
+      model: "gemini-3-flash-preview",
       contents: prompt,
       config: {
         responseMimeType: "application/json",
