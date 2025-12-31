@@ -1,10 +1,10 @@
 
-import { UserStats } from "../types";
+import { UserStats, WrongQuestion } from "../types";
 
 /**
- * kvdb.io 稳定版存储服务
+ * kvdb.io 稳定版存储服务 - 采用更短的存储桶
  */
-const BUCKET_ID = "GaokaoSync_ZC_Final_2025"; 
+const BUCKET_ID = "gk_v1"; 
 const API_BASE = `https://kvdb.io/${BUCKET_ID}`;
 
 export const generateSyncId = () => {
@@ -16,37 +16,82 @@ export const generateSyncId = () => {
   return result;
 };
 
+/**
+ * 核心：数据瘦身处理，防止体积过大导致同步失败
+ */
+const compressStats = (stats: UserStats): any => {
+  const simplify = (q: WrongQuestion) => ({
+    q: q.question,
+    o: q.options,
+    a: q.answerIndex,
+    e: q.explanation,
+    p: q.grammarPoint,
+    u: q.userAnswerIndex,
+    t: q.timestamp
+  });
+
+  return {
+    wc: stats.wrongCounts,
+    wh: stats.wrongHistory.slice(0, 80).map(simplify), // 限制上传最近80条错题
+    sh: stats.savedHistory.slice(0, 50).map(simplify), // 限制上传最近50条收藏
+    sid: stats.syncId,
+    ts: Date.now()
+  };
+};
+
+/**
+ * 核心：数据解压还原
+ */
+const decompressStats = (data: any): UserStats => {
+  const restore = (q: any): WrongQuestion => ({
+    id: `q_${q.t}`,
+    question: q.q,
+    options: q.o,
+    answerIndex: q.a,
+    explanation: q.e,
+    grammarPoint: q.p,
+    difficulty: '中等',
+    userAnswerIndex: q.u,
+    timestamp: q.t
+  });
+
+  return {
+    wrongCounts: data.wc || {},
+    wrongHistory: (data.wh || []).map(restore),
+    savedHistory: (data.sh || []).map(restore),
+    syncId: data.sid,
+    lastSyncTime: data.ts
+  };
+};
+
 export const uploadToCloud = async (syncId: string, stats: UserStats) => {
   if (!syncId) throw new Error("SYNC_ID_MISSING");
   
-  const syncData = {
-    ...stats,
-    syncId, // 确保 syncId 也包含在数据中
-    lastSyncTime: Date.now()
-  };
+  // 1. 数据瘦身
+  const payload = compressStats(stats);
+  const body = JSON.stringify(payload);
+
+  // 2. 检查体积（调试用）
+  console.log(`Payload size: ${(body.length / 1024).toFixed(2)} KB`);
 
   try {
     const response = await fetch(`${API_BASE}/${syncId}`, {
       method: 'PUT',
-      body: JSON.stringify(syncData),
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      body: body,
+      headers: { 'Content-Type': 'application/json' },
       mode: 'cors',
-      cache: 'no-store'
+      cache: 'no-store',
+      referrerPolicy: "no-referrer"
     });
 
     if (!response.ok) {
-      throw new Error(`Cloud connection failed (${response.status})`);
+      throw new Error(`Server returned ${response.status}`);
     }
 
-    return syncData.lastSyncTime;
+    return payload.ts;
   } catch (error: any) {
     console.error("Cloud Upload Error:", error);
-    if (error.message.includes('fetch')) {
-      throw new Error("网络受限：无法连接到云服务器，请检查网络或VPN设置");
-    }
-    throw error;
+    throw new Error("同步失败：请检查网络连接或尝试缩减错题数量");
   }
 };
 
@@ -54,34 +99,19 @@ export const downloadFromCloud = async (syncId: string): Promise<UserStats | nul
   if (!syncId) return null;
 
   try {
-    // 强制不使用缓存，获取最新云端快照
-    const response = await fetch(`${API_BASE}/${syncId}?nocache=${Date.now()}`, {
+    const response = await fetch(`${API_BASE}/${syncId}?t=${Date.now()}`, {
       method: 'GET',
       mode: 'cors',
       cache: 'no-store'
     });
     
-    if (response.status === 404) {
-      return null;
-    }
-
-    if (!response.ok) {
-      throw new Error(`Download failed (${response.status})`);
-    }
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error(`Fetch error ${response.status}`);
 
     const data = await response.json();
-    
-    // 严格数据结构校验
-    if (data && typeof data === 'object' && (Array.isArray(data.wrongHistory) || Array.isArray(data.savedHistory))) {
-      return data as UserStats;
-    }
-    
-    return null;
+    return decompressStats(data);
   } catch (error: any) {
     console.error("Cloud Download Error:", error);
-    if (error.message.includes('fetch')) {
-      throw new Error("连接云端超时：请确认设备网络正常且未屏蔽外部接口");
-    }
-    throw error;
+    throw new Error("获取失败：云端连接不稳定，请稍后重试");
   }
 };

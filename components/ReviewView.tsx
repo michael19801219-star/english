@@ -26,15 +26,14 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
   const [deepDives, setDeepDives] = useState<Record<string, DeepDiveData>>({});
   const [loadingPoints, setLoadingPoints] = useState<Record<string, boolean>>({});
   const [errorPoints, setErrorPoints] = useState<Record<string, boolean>>({});
-  const [activeChatId, setActiveChatId] = useState<string | null>(null);
   
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  // 用于自定义删除弹窗的状态
+  const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; timestamp: number | null }>({ isOpen: false, timestamp: null });
 
   useEffect(() => {
     setActiveTab(initialTab);
   }, [initialTab]);
 
-  // Use explicit Record type to avoid unknown inference
   const groupedData = useMemo<Record<string, WrongQuestion[]>>(() => {
     const currentList = activeTab === 'details' ? history : savedHistory;
     const acc: Record<string, WrongQuestion[]> = {};
@@ -45,7 +44,6 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
     return acc;
   }, [activeTab, history, savedHistory]);
 
-  // Use explicit Record type for knowledgeMap
   const knowledgeMap = useMemo<Record<string, { count: number; questions: WrongQuestion[] }>>(() => {
     const acc: Record<string, { count: number; questions: WrongQuestion[] }> = {};
     history.forEach(q => {
@@ -61,13 +59,20 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
       .sort((a, b) => b[1].count - a[1].count);
   }, [knowledgeMap]);
 
-  const handleDelete = (e: React.MouseEvent | React.PointerEvent, timestamp: number) => {
+  // 打开确认弹窗
+  const handleRequestDelete = (e: React.MouseEvent | React.PointerEvent, timestamp: number) => {
     e.preventDefault();
     e.stopPropagation();
-    if (confirm("确定要删除这条记录吗？")) {
-      if (activeTab === 'details') onDeleteWrong(timestamp);
-      else onDeleteSaved(timestamp);
+    setDeleteConfirm({ isOpen: true, timestamp });
+  };
+
+  // 执行删除动作
+  const confirmDelete = () => {
+    if (deleteConfirm.timestamp) {
+      if (activeTab === 'details') onDeleteWrong(deleteConfirm.timestamp);
+      else onDeleteSaved(deleteConfirm.timestamp);
     }
+    setDeleteConfirm({ isOpen: false, timestamp: null });
   };
 
   const handleTogglePoint = async (point: string) => {
@@ -129,7 +134,6 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
         ) : activeTab === 'summary' ? (
           <div className="space-y-4">
             {sortedPoints.map(([point, data]) => {
-              // Fix: Explicitly type diveData to ensure properties like 'tips' are recognized
               const diveData: DeepDiveData | undefined = deepDives[point];
               return (
                 <div key={point} className="bg-white rounded-[24px] border border-gray-100 overflow-hidden shadow-sm">
@@ -157,7 +161,6 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
                           <div className="p-4 bg-green-50/50 rounded-2xl border border-green-100/50">
                             <h6 className="text-[10px] font-black text-green-700 uppercase mb-2">避坑指南</h6>
                             <ul className="list-disc list-inside space-y-1">
-                              {/* Fix: Check Array.isArray and use explicit cast to string[] to resolve 'unknown' type error on tips.map */}
                               {Array.isArray(diveData.tips) && (diveData.tips as string[]).map((tip: string, i: number) => (
                                 <li key={i} className="text-[13px] text-green-900 leading-relaxed">{tip}</li>
                               ))}
@@ -174,7 +177,6 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
           </div>
         ) : (
           <div className="space-y-8">
-            {/* Fix: Cast Object.entries result to ensure [point, items] are correctly typed during map */}
             {(Object.entries(groupedData) as [string, WrongQuestion[]][]).map(([point, items]) => (
               <div key={point} className="space-y-4">
                 <div className="flex items-center gap-3 py-2">
@@ -184,7 +186,7 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
                 {items.map((q) => (
                   <div key={q.timestamp} className="bg-white p-6 rounded-[28px] border border-gray-100 shadow-sm relative overflow-hidden">
                     <button 
-                      onPointerDown={(e) => handleDelete(e, q.timestamp)}
+                      onPointerDown={(e) => handleRequestDelete(e, q.timestamp)}
                       className="absolute top-2 right-2 w-12 h-12 flex items-center justify-center rounded-full bg-red-50/50 text-red-500 active:scale-90 transition-all z-20"
                     >
                       <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
@@ -209,6 +211,33 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
           </div>
         )}
       </div>
+
+      {/* 自定义删除确认弹窗 */}
+      {deleteConfirm.isOpen && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 backdrop-blur-sm p-6 animate-fadeIn">
+          <div className="bg-white w-full max-w-sm rounded-[40px] p-8 shadow-2xl scale-100 animate-fadeIn">
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl">🗑️</div>
+              <h3 className="text-xl font-black text-gray-900">确定要删除这条记录吗？</h3>
+              <p className="text-xs text-gray-400 mt-2 font-medium">删除后将无法通过此页面找回。</p>
+            </div>
+            <div className="flex flex-col gap-3">
+              <button 
+                onClick={confirmDelete} 
+                className="w-full py-4.5 bg-gradient-to-r from-red-500 to-rose-600 text-white rounded-2xl font-black shadow-lg shadow-red-100 active:scale-95 transition-all"
+              >
+                确认删除
+              </button>
+              <button 
+                onClick={() => setDeleteConfirm({ isOpen: false, timestamp: null })} 
+                className="w-full py-4.5 bg-gray-50 text-gray-500 rounded-2xl font-bold active:scale-95 transition-all"
+              >
+                返回
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
