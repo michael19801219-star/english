@@ -30,15 +30,33 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onUpd
     );
   };
 
-  const handleCreateSync = () => {
+  // 改进：开启同步时立即触发一次备份
+  const handleCreateSync = async () => {
+    setIsSyncing(true);
+    setErrorMsg('');
     const newId = generateSyncId();
-    onUpdateStats({ ...stats, syncId: newId });
+    const initialStats = { ...stats, syncId: newId };
+    
+    try {
+      const time = await uploadToCloud(newId, initialStats);
+      onUpdateStats({ ...initialStats, lastSyncTime: time });
+      setSyncStatus('success');
+      setTimeout(() => setSyncStatus('idle'), 2000);
+    } catch (e: any) {
+      // 即使初次上传失败，也先给用户分配ID，方便以后重试
+      onUpdateStats(initialStats);
+      setSyncStatus('error');
+      setErrorMsg("ID已生成，但初次云端备份失败，可稍后点击上传。");
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   const handleUpload = async () => {
     if (!stats.syncId) return;
     setIsSyncing(true);
     setSyncStatus('idle');
+    setErrorMsg('');
     try {
       const time = await uploadToCloud(stats.syncId, stats);
       onUpdateStats({ ...stats, lastSyncTime: time });
@@ -46,31 +64,43 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onUpd
       setTimeout(() => setSyncStatus('idle'), 3000);
     } catch (e: any) {
       setSyncStatus('error');
-      setErrorMsg(e.message);
+      setErrorMsg(e.message || "上传失败，请重试");
     } finally {
       setIsSyncing(false);
     }
   };
 
   const handleDownload = async () => {
-    if (!syncIdInput.trim()) return;
+    const code = syncIdInput.trim().toUpperCase();
+    if (code.length < 6) {
+      setSyncStatus('error');
+      setErrorMsg("请输入6位完整的同步码");
+      return;
+    }
+    
     setIsSyncing(true);
     setSyncStatus('idle');
+    setErrorMsg('');
     try {
-      const remoteData = await downloadFromCloud(syncIdInput.trim());
+      const remoteData = await downloadFromCloud(code);
       if (remoteData) {
-        if (confirm("下载云端数据将覆盖本地所有记录，确定继续吗？")) {
-          onUpdateStats(remoteData);
+        if (confirm("✨ 发现云端数据！确认下载并覆盖当前所有记录吗？此操作不可撤销。")) {
+          // 核心：强制同步码也设为远程这个码
+          const mergedData = { ...remoteData, syncId: code };
+          onUpdateStats(mergedData);
           setSyncStatus('success');
+          setSyncIdInput('');
           setTimeout(() => setIsSyncOpen(false), 1500);
+        } else {
+          setSyncStatus('idle');
         }
       } else {
         setSyncStatus('error');
-        setErrorMsg("未找到匹配该同步码的数据");
+        setErrorMsg("同步码无效或云端无历史备份");
       }
     } catch (e: any) {
       setSyncStatus('error');
-      setErrorMsg(e.message);
+      setErrorMsg(e.message || "网络异常");
     } finally {
       setIsSyncing(false);
     }
@@ -96,10 +126,10 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onUpd
             </h1>
             <div className="mt-4 flex gap-2">
               <button 
-                onClick={() => setIsSyncOpen(true)}
+                onClick={() => { setIsSyncOpen(true); setSyncStatus('idle'); setErrorMsg(''); }}
                 className="flex items-center gap-2 px-3 py-1.5 bg-white rounded-full shadow-sm border border-gray-100 active:scale-95 transition-all"
               >
-                <span className="text-xs font-medium text-gray-600">{stats.syncId ? '☁️ 云同步中' : '☁️ 开启同步'}</span>
+                <span className="text-xs font-medium text-gray-600">{stats.syncId ? '☁️ 云同步开启' : '☁️ 未开启同步'}</span>
                 <div className={`w-2 h-2 rounded-full ${stats.syncId ? 'bg-green-500' : 'bg-gray-300 animate-pulse'}`}></div>
               </button>
             </div>
@@ -212,64 +242,71 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onUpd
         <div className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-sm flex items-center justify-center p-6 animate-fadeIn" onClick={() => setIsSyncOpen(false)}>
           <div className="bg-white w-full max-w-sm rounded-[40px] p-8 shadow-2xl" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-2">
-              <h3 className="text-xl font-black text-gray-900">跨设备同步</h3>
+              <h3 className="text-xl font-black text-gray-900">数据同步云</h3>
               <button onClick={() => setIsSyncOpen(false)} className="text-gray-300">✕</button>
             </div>
-            <p className="text-[11px] text-gray-400 mb-6 font-medium">输入同步码可在不同手机上同步您的练习记录。</p>
+            <p className="text-[11px] text-gray-400 mb-6 font-medium leading-relaxed">在另一台设备输入下方代码，即可瞬间恢复所有错题记录和收藏。</p>
             
             <div className="space-y-6">
               {stats.syncId ? (
-                <div className="p-5 bg-indigo-50/50 rounded-[24px] border border-indigo-100/50 text-center">
-                   <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-2">您的专属同步码</p>
-                   <p className="text-3xl font-black text-indigo-600 tracking-widest mb-3">{stats.syncId}</p>
+                <div className="p-5 bg-indigo-50/50 rounded-[24px] border border-indigo-100/50 text-center relative">
+                   <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-2">当前设备同步码</p>
+                   <p className="text-3xl font-black text-indigo-600 tracking-widest mb-3 select-all">{stats.syncId}</p>
                    <button 
                     disabled={isSyncing}
                     onClick={handleUpload} 
-                    className={`w-full py-3 bg-indigo-600 text-white rounded-xl text-xs font-black shadow-lg shadow-indigo-100 active:scale-95 transition-all flex items-center justify-center gap-2 ${isSyncing ? 'opacity-50' : ''}`}
+                    className={`w-full py-3 bg-indigo-600 text-white rounded-xl text-xs font-black shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 ${isSyncing ? 'opacity-50' : ''}`}
                    >
                      {isSyncing ? <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> : '📤'}
-                     上传当前进度到云端
+                     {isSyncing ? '同步中...' : '手动备份当前进度'}
                    </button>
                    {stats.lastSyncTime && (
-                    <p className="text-[9px] text-indigo-300 mt-2 font-bold opacity-80">云端更新于: {new Date(stats.lastSyncTime).toLocaleString()}</p>
+                    <p className="text-[9px] text-indigo-300 mt-2 font-bold opacity-80">云端已更新: {new Date(stats.lastSyncTime).toLocaleString()}</p>
                    )}
                 </div>
               ) : (
                 <button 
+                  disabled={isSyncing}
                   onClick={handleCreateSync}
-                  className="w-full py-4.5 bg-indigo-600 text-white rounded-2xl font-black shadow-lg shadow-indigo-100 active:scale-95 transition-all"
+                  className={`w-full py-4.5 bg-indigo-600 text-white rounded-2xl font-black shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 ${isSyncing ? 'opacity-50' : ''}`}
                 >
-                  🚀 启用云同步服务
+                  {isSyncing ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> : '🚀'}
+                  一键开启云同步
                 </button>
               )}
 
               <div className="relative">
                 <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-100"></div></div>
-                <div className="relative flex justify-center text-[10px] uppercase font-black text-gray-300 tracking-widest bg-white px-2">拉取远程数据</div>
+                <div className="relative flex justify-center text-[10px] uppercase font-black text-gray-300 tracking-widest bg-white px-2">旧设备数据迁入</div>
               </div>
 
               <div className="space-y-3">
                 <input 
                   type="text" 
-                  placeholder="输入6位同步码" 
+                  placeholder="输入6位原设备同步码" 
                   value={syncIdInput}
                   maxLength={6}
                   onChange={e => setSyncIdInput(e.target.value.toUpperCase())}
-                  className="w-full p-4.5 bg-gray-50 rounded-2xl text-center font-black text-gray-700 border-none focus:ring-2 focus:ring-indigo-500/20"
+                  className="w-full p-4.5 bg-gray-50 rounded-2xl text-center font-black text-gray-700 border-none focus:ring-2 focus:ring-indigo-500/20 uppercase tracking-widest"
                 />
                 <button 
-                  disabled={isSyncing || !syncIdInput.trim()}
+                  disabled={isSyncing || syncIdInput.length < 6}
                   onClick={handleDownload}
-                  className={`w-full py-4 bg-gray-900 text-white rounded-2xl font-black active:scale-95 transition-all flex items-center justify-center gap-2 ${isSyncing || !syncIdInput.trim() ? 'opacity-30' : ''}`}
+                  className={`w-full py-4 bg-gray-900 text-white rounded-2xl font-black active:scale-95 transition-all flex items-center justify-center gap-2 ${isSyncing || syncIdInput.length < 6 ? 'opacity-30' : ''}`}
                 >
-                  {isSyncing ? <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> : '📥'}
-                  下载并同步到本机
+                  {isSyncing ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> : '📥'}
+                  下载并合并数据
                 </button>
               </div>
             </div>
             
-            {syncStatus === 'success' && <p className="text-center text-[10px] text-green-500 font-black mt-4 animate-bounce">✨ 同步已完成</p>}
-            {syncStatus === 'error' && <p className="text-center text-[10px] text-red-500 font-black mt-4">❌ {errorMsg || '同步失败，请重试'}</p>}
+            {syncStatus === 'success' && <p className="text-center text-[10px] text-green-500 font-black mt-4 animate-bounce">✨ 云端交互成功</p>}
+            {syncStatus === 'error' && (
+              <div className="mt-4 p-3 bg-red-50 rounded-xl border border-red-100">
+                <p className="text-center text-[10px] text-red-500 font-black">❌ {errorMsg}</p>
+                <p className="text-center text-[8px] text-red-300 mt-1 font-medium italic">如多次失败，请检查手机是否开启了广告过滤或网络防火墙</p>
+              </div>
+            )}
           </div>
         </div>
       )}

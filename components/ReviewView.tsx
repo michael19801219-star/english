@@ -34,7 +34,7 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
     setActiveTab(initialTab);
   }, [initialTab]);
 
-  // Rename 'map' to 'acc' to avoid shadowing built-in 'map' method and fix potential 'unknown' inference issues
+  // Use explicit Record type to avoid unknown inference
   const groupedData = useMemo<Record<string, WrongQuestion[]>>(() => {
     const currentList = activeTab === 'details' ? history : savedHistory;
     const acc: Record<string, WrongQuestion[]> = {};
@@ -45,7 +45,7 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
     return acc;
   }, [activeTab, history, savedHistory]);
 
-  // Rename 'map' to 'acc' and ensure explicit return type
+  // Use explicit Record type for knowledgeMap
   const knowledgeMap = useMemo<Record<string, { count: number; questions: WrongQuestion[] }>>(() => {
     const acc: Record<string, { count: number; questions: WrongQuestion[] }> = {};
     history.forEach(q => {
@@ -129,8 +129,7 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
         ) : activeTab === 'summary' ? (
           <div className="space-y-4">
             {sortedPoints.map(([point, data]) => {
-              // Extract diveData to help TypeScript narrowing and avoid index access type loss in JSX
-              // Explicitly type diveData to avoid inference issues with Record and complex ternary
+              // Fix: Explicitly type diveData to ensure properties like 'tips' are recognized
               const diveData: DeepDiveData | undefined = deepDives[point];
               return (
                 <div key={point} className="bg-white rounded-[24px] border border-gray-100 overflow-hidden shadow-sm">
@@ -158,8 +157,8 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
                           <div className="p-4 bg-green-50/50 rounded-2xl border border-green-100/50">
                             <h6 className="text-[10px] font-black text-green-700 uppercase mb-2">避坑指南</h6>
                             <ul className="list-disc list-inside space-y-1">
-                              {/* Use explicit cast to string[] to resolve 'unknown' type error on tips.map */}
-                              {(diveData.tips as string[]).map((tip, i) => (
+                              {/* Fix: Check Array.isArray and use explicit cast to string[] to resolve 'unknown' type error on tips.map */}
+                              {Array.isArray(diveData.tips) && (diveData.tips as string[]).map((tip: string, i: number) => (
                                 <li key={i} className="text-[13px] text-green-900 leading-relaxed">{tip}</li>
                               ))}
                             </ul>
@@ -175,7 +174,8 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
           </div>
         ) : (
           <div className="space-y-8">
-            {Object.entries(groupedData).map(([point, items]) => (
+            {/* Fix: Cast Object.entries result to ensure [point, items] are correctly typed during map */}
+            {(Object.entries(groupedData) as [string, WrongQuestion[]][]).map(([point, items]) => (
               <div key={point} className="space-y-4">
                 <div className="flex items-center gap-3 py-2">
                    <div className="w-1.5 h-6 bg-indigo-500 rounded-full"></div>
