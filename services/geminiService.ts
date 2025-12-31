@@ -42,6 +42,7 @@ async function withRetry<T>(
   return execute(0);
 }
 
+// 使用推荐的 Gemini 3 Flash 模型进行基础文本任务
 const TEXT_MODEL = 'gemini-3-flash-preview';
 
 const SCHEMA = {
@@ -68,9 +69,11 @@ export const generateGrammarQuestions = async (
   onProgress?: (msg: string) => void
 ): Promise<Question[]> => {
   return withRetry(async () => {
+    // 每次调用前实例化，确保获取最新配置
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const pointsDesc = targetPoints.length > 0 ? `重点考察：${targetPoints.join('、')}。` : "涵盖高考核心考点。";
     
+    // 调用 generateContent 接口
     const response = await ai.models.generateContent({
       model: TEXT_MODEL,
       contents: `生成 ${count} 道单项填空练习题。难度：${difficulty}。${pointsDesc}`,
@@ -86,6 +89,7 @@ export const generateGrammarQuestions = async (
       }
     });
     
+    // 直接访问 text 属性
     const text = response.text || "[]";
     try {
       const data = JSON.parse(text);
@@ -114,7 +118,8 @@ export const askFollowUpQuestion = async (
         temperature: 0.7 
       }
     });
-    return response.text || "请再问一遍，老师刚才走神了。";
+    // 使用 response.text 属性获取文本
+    return response.text || "老师正在组织语言，请再问一遍。";
   }, 2);
 };
 
@@ -144,6 +149,7 @@ export const getGrammarDeepDive = async (
         temperature: 0.2
       }
     });
+    // 访问 response.text 属性
     return JSON.parse(response.text || "{}");
   }, 3);
 };
