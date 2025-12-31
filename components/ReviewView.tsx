@@ -217,13 +217,16 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
           <main className="p-6 space-y-8 animate-fadeIn pb-24">
             {activeTab === 'summary' ? (
               <div className="space-y-6">
-                {/* 考点提炼 UI 保持不变 */}
                 {sortedPoints.length > 0 && (
                   <section className="bg-gradient-to-br from-indigo-700 to-violet-700 rounded-[32px] p-8 text-white shadow-xl shadow-indigo-100 relative overflow-hidden">
                     <div className="absolute -right-8 -top-8 w-32 h-32 bg-white/10 rounded-full blur-2xl"></div>
                     <div className="relative z-10">
                       <p className="text-white/60 text-[10px] font-black uppercase tracking-widest mb-4">Focus Analysis</p>
                       <h2 className="text-2xl font-black mb-6 leading-tight">你需要重点关注<br/><span className="text-yellow-300">#{sortedPoints[0][0]}</span></h2>
+                      <div className="flex items-center gap-4 p-4 bg-white/10 rounded-2xl border border-white/10 mt-4">
+                        <div className="text-2xl">🎯</div>
+                        <p className="text-xs text-white/90 font-medium leading-relaxed italic">该考点错误率最高，AI 建议你优先复习相关概念。</p>
+                      </div>
                     </div>
                   </section>
                 )}
@@ -240,8 +243,52 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
                             <p className="text-xs text-gray-400 font-medium">涉及 {data.count} 道错题</p>
                           </div>
                         </div>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-transform ${selectedPoint === point ? 'rotate-180 bg-indigo-50 text-indigo-600' : 'bg-gray-50 text-gray-300'}`}>
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7"/></svg>
+                        </div>
                       </button>
-                      {/* Deep Dive 内容省略... */}
+                      
+                      {selectedPoint === point && (
+                        <div className="px-6 pb-6 animate-fadeIn">
+                          <div className="pt-4 border-t border-gray-50 space-y-5">
+                            {loadingPoints[point] ? (
+                              <div className="py-8 flex flex-col items-center justify-center space-y-3">
+                                <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
+                                <p className="text-[11px] text-gray-400 font-bold">AI 正在生成专项解析...</p>
+                              </div>
+                            ) : errorPoints[point] ? (
+                              <div className="py-8 flex flex-col items-center justify-center space-y-4">
+                                 <div className="text-3xl">⏳</div>
+                                 <p className="text-[13px] text-gray-500 font-bold">解析生成失败，请重试</p>
+                                 <button onClick={() => fetchDeepDive(point)} className="px-6 py-2.5 bg-indigo-50 text-indigo-600 rounded-full text-xs font-black">重试</button>
+                              </div>
+                            ) : deepDives[point] ? (
+                              <div className="space-y-4">
+                                <div className="bg-indigo-50/50 p-5 rounded-[22px] border border-indigo-100/50">
+                                  <h6 className="text-[12px] font-black text-indigo-700 uppercase tracking-tight mb-2 flex items-center gap-2"><span>📘</span> 考点精讲</h6>
+                                  <p className="text-[13px] text-indigo-900 font-medium leading-relaxed">{deepDives[point].lecture}</p>
+                                </div>
+                                <div className="bg-red-50/50 p-5 rounded-[22px] border border-red-100/50">
+                                  <h6 className="text-[12px] font-black text-red-700 uppercase tracking-tight mb-2 flex items-center gap-2"><span>🔍</span> 错因分析</h6>
+                                  <p className="text-[13px] text-red-900 font-medium leading-relaxed italic">{deepDives[point].mistakeAnalysis}</p>
+                                </div>
+                                <div className="bg-amber-50/50 p-5 rounded-[22px] border border-amber-100/50">
+                                  <h6 className="text-[12px] font-black text-amber-700 uppercase tracking-tight mb-2 flex items-center gap-2"><span>💡</span> 避坑指南</h6>
+                                  <ul className="space-y-2">
+                                    {deepDives[point].tips.map((tip, idx) => (
+                                      <li key={idx} className="text-[12px] text-amber-900 font-bold flex gap-2">
+                                        <span className="opacity-40">{idx + 1}.</span>
+                                        <span>{tip}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                                <button onClick={() => onStartQuiz(point)} className="w-full py-4.5 bg-indigo-600 text-white rounded-[24px] font-black text-[15px] shadow-lg active:scale-95 transition-all">开启专项突破</button>
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -279,7 +326,7 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
                                 </button>
                               </div>
                               <p className="text-[15px] text-gray-800 font-bold mb-4 leading-relaxed">{q.question}</p>
-                              {/* 选项和解析展示保持不变... */}
+                              
                               <div className="grid grid-cols-1 gap-2 mb-5">
                                 {q.options.map((opt, i) => (
                                   <div key={i} className={`p-3 rounded-xl text-[13px] border flex gap-2 ${i === q.answerIndex ? 'bg-green-50 border-green-200 text-green-700 font-bold' : i === q.userAnswerIndex ? 'bg-red-50 border-red-200 text-red-700' : 'bg-gray-50 border-gray-50 text-gray-400'}`}>
@@ -288,6 +335,7 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
                                   </div>
                                 ))}
                               </div>
+
                               <div className="p-5 bg-gray-50/80 rounded-[20px] border border-gray-100 relative overflow-hidden mb-4">
                                 <div className="absolute top-0 left-0 w-1 h-full bg-indigo-200"></div>
                                 <div className="flex items-center justify-between mb-2">
@@ -301,7 +349,59 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
                                 </div>
                                 <p className="text-[13px] text-gray-600 leading-relaxed font-medium">{q.explanation}</p>
                               </div>
-                              {/* 聊天功能省略... */}
+
+                              {isChatting && (
+                                <div className="mt-4 p-5 bg-indigo-50/50 rounded-[24px] border border-indigo-100/50 animate-fadeIn">
+                                  <div className="space-y-3 mb-4 max-h-[200px] overflow-y-auto no-scrollbar">
+                                    {chatHistory.length === 0 && (
+                                      <p className="text-[11px] text-indigo-400 font-bold italic text-center py-2">对这道题还有不理解的地方？在下方问问我吧！</p>
+                                    )}
+                                    {chatHistory.map((msg, idx) => (
+                                      <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-fadeIn`}>
+                                        <div className={`max-w-[85%] p-3 rounded-2xl text-[12px] font-medium leading-relaxed ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-br-none' : 'bg-white text-gray-700 rounded-bl-none border border-indigo-50 shadow-sm'}`}>
+                                          {msg.content}
+                                        </div>
+                                      </div>
+                                    ))}
+                                    {isAsking && (
+                                      <div className="flex justify-start">
+                                        <div className="bg-white p-2 rounded-xl flex gap-1 animate-pulse border border-indigo-50">
+                                          <div className="w-1 h-1 bg-indigo-200 rounded-full"></div>
+                                          <div className="w-1 h-1 bg-indigo-300 rounded-full"></div>
+                                          <div className="w-1 h-1 bg-indigo-400 rounded-full"></div>
+                                        </div>
+                                      </div>
+                                    )}
+                                    <div ref={chatEndRef} />
+                                  </div>
+                                  
+                                  <div className="flex gap-2">
+                                    <div className="relative flex-1">
+                                      <input
+                                        type="text"
+                                        value={followUpQuery}
+                                        onChange={(e) => setFollowUpQuery(e.target.value)}
+                                        onKeyPress={(e) => e.key === 'Enter' && handleAskTutor(q)}
+                                        placeholder={isRecognizing ? "聆听中..." : "输入疑问..."}
+                                        className={`w-full py-2.5 pl-4 pr-10 bg-white rounded-xl border-none text-[12px] font-bold shadow-sm focus:ring-2 focus:ring-indigo-500/20 ${isRecognizing ? 'ring-2 ring-indigo-500 bg-indigo-50' : ''}`}
+                                      />
+                                      <button 
+                                        onClick={() => isRecognizing ? recognitionRef.current?.stop() : recognitionRef.current?.start()}
+                                        className={`absolute right-1 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-lg transition-all ${isRecognizing ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:text-indigo-400'}`}
+                                      >
+                                        🎙️
+                                      </button>
+                                    </div>
+                                    <button 
+                                      onClick={() => handleAskTutor(q)}
+                                      disabled={!followUpQuery.trim() || isAsking}
+                                      className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${!followUpQuery.trim() || isAsking ? 'bg-gray-100 text-gray-300' : 'bg-indigo-600 text-white active:scale-95'}`}
+                                    >
+                                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           );
                         })}

@@ -42,7 +42,6 @@ const App: React.FC = () => {
     saveStatsToStorage(newStats);
   };
 
-  // Added handleGoToReview to fix the missing name error and handle navigation to review tabs
   const handleGoToReview = (tab?: 'summary' | 'details' | 'saved') => {
     if (tab) setReviewInitialTab(tab);
     setView(AppState.REVIEW);
@@ -58,7 +57,6 @@ const App: React.FC = () => {
         userAnswerIndex,
         timestamp: Date.now()
       };
-      // 去重并限制 200 条
       const filteredHistory = newStats.wrongHistory.filter(q => q.question !== question.question);
       newStats.wrongHistory = [wrongEntry, ...filteredHistory].slice(0, 200);
       saveStatsToStorage(newStats);
@@ -116,7 +114,6 @@ const App: React.FC = () => {
         setErrorType('RPM');
         setShowQuotaModal(true);
       } else {
-        // 二次检查错误内容
         if (errorMsg.includes("API Key") || errorMsg.includes("set when running in a browser")) {
           setErrorType('KEY');
           setShowQuotaModal(true);
@@ -222,12 +219,11 @@ const App: React.FC = () => {
                    <p className="text-[10px] text-red-600/70 leading-relaxed">
                      你部署的 Vercel 项目中尚未添加名为 <b>API_KEY</b> 的环境变量。<br/><br/>
                      请在 Vercel 控制台：<br/>
-                     <b>Settings -> Environment Variables</b><br/>
+                     <b>Settings &rarr; Environment Variables</b><br/>
                      添加 Key 后重新部署一次。
                    </p>
                 </div>
               )}
-              {/* 其他错误提示保持一致 */}
               {errorType === 'RPM' && (
                 <div className="p-3 bg-indigo-50 rounded-xl border border-indigo-100">
                    <p className="text-[11px] font-black text-indigo-700 mb-1">频率限制 (RPM)</p>

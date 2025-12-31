@@ -80,7 +80,6 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onUpd
     <div className="flex-1 flex flex-col bg-gray-50 animate-fadeIn relative">
       <div className="absolute top-[-80px] left-[-40px] w-72 h-72 bg-indigo-200 rounded-full blur-[90px] opacity-30 -z-10"></div>
       
-      {/* 滚动内容区：增加底部内边距以防被页脚遮挡 */}
       <div className="flex-1 overflow-y-auto px-6 pb-40 no-scrollbar">
         <header className="py-8 flex justify-between items-start">
           <div className="flex flex-col">
@@ -169,7 +168,6 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onUpd
         </div>
       </div>
 
-      {/* 底部悬浮页脚 */}
       <footer className="absolute bottom-0 left-0 right-0 z-30 pointer-events-none">
         <div className="h-24 bg-gradient-to-t from-gray-50 via-gray-50/90 to-transparent"></div>
         <div className="bg-gray-50/95 backdrop-blur-xl px-6 pb-10 pt-2 border-t border-gray-100/50 pointer-events-auto shadow-[0_-10px_30px_rgba(0,0,0,0.03)]">
@@ -183,7 +181,91 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onUpd
           <p className="text-center text-[9px] font-bold text-gray-300 mt-4 uppercase tracking-[0.2em] opacity-60">周琮钦专属定制版 · 高考英语语法大师</p>
         </div>
       </footer>
-      {/* 弹窗部分省略... */}
+
+      {isModalOpen && (
+        <div className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-sm flex items-end justify-center p-4 animate-fadeIn" onClick={() => setIsModalOpen(false)}>
+          <div className="bg-white w-full max-w-sm rounded-[40px] p-8 shadow-2xl animate-fadeIn" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-black text-gray-900 tracking-tight">考点选择</h3>
+              <button onClick={() => setSelectedPoints([])} className="text-[11px] font-black text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-xl active:scale-90 transition-all">重置</button>
+            </div>
+            <div className="grid grid-cols-2 gap-3 max-h-[350px] overflow-y-auto no-scrollbar mb-8">
+              {GRAMMAR_POINTS.map(point => (
+                <button 
+                  key={point} 
+                  onClick={() => togglePoint(point)} 
+                  className={`p-4 rounded-[22px] text-[12px] font-black transition-all border-2 text-center ${selectedPoints.includes(point) ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg' : 'bg-gray-50 border-transparent text-gray-500 hover:bg-white hover:border-indigo-100'}`}
+                >
+                  {point}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setIsModalOpen(false)} className="w-full py-4.5 bg-gray-900 text-white rounded-[24px] font-black shadow-xl active:scale-95 transition-all">确定修改</button>
+          </div>
+        </div>
+      )}
+
+      {isSyncOpen && (
+        <div className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-sm flex items-center justify-center p-6 animate-fadeIn" onClick={() => setIsSyncOpen(false)}>
+          <div className="bg-white w-full max-w-sm rounded-[40px] p-8 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-xl font-black text-gray-900 mb-2">云端同步</h3>
+            <p className="text-xs text-gray-400 mb-6 font-medium">在不同设备上输入同步码，同步你的学习进度。</p>
+            
+            <div className="space-y-6">
+              {stats.syncId ? (
+                <div className="p-5 bg-indigo-50/50 rounded-[24px] border border-indigo-100/50 text-center">
+                   <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-2">你的专属同步码</p>
+                   <p className="text-3xl font-black text-indigo-600 tracking-widest mb-3">{stats.syncId}</p>
+                   <button 
+                    disabled={isSyncing}
+                    onClick={handleUpload} 
+                    className={`w-full py-3 bg-indigo-600 text-white rounded-xl text-xs font-black shadow-lg shadow-indigo-100 active:scale-95 transition-all flex items-center justify-center gap-2 ${isSyncing ? 'opacity-50' : ''}`}
+                   >
+                     {isSyncing ? <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> : '📤'}
+                     立即上传当前数据
+                   </button>
+                   {stats.lastSyncTime && (
+                    <p className="text-[9px] text-indigo-300 mt-2 font-bold">上次同步: {new Date(stats.lastSyncTime).toLocaleString()}</p>
+                   )}
+                </div>
+              ) : (
+                <button 
+                  onClick={handleCreateSync}
+                  className="w-full py-4.5 bg-indigo-600 text-white rounded-2xl font-black shadow-lg shadow-indigo-100 active:scale-95 transition-all"
+                >
+                  🚀 生成我的同步码
+                </button>
+              )}
+
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-100"></div></div>
+                <div className="relative flex justify-center text-[10px] uppercase font-black text-gray-300 tracking-widest bg-white px-2">OR</div>
+              </div>
+
+              <div className="space-y-3">
+                <input 
+                  type="text" 
+                  placeholder="输入其他设备的同步码" 
+                  value={syncIdInput}
+                  onChange={e => setSyncIdInput(e.target.value.toUpperCase())}
+                  className="w-full p-4.5 bg-gray-50 rounded-2xl text-center font-black text-gray-700 border-none focus:ring-2 focus:ring-indigo-500/20"
+                />
+                <button 
+                  disabled={isSyncing || !syncIdInput.trim()}
+                  onClick={handleDownload}
+                  className={`w-full py-4 bg-gray-900 text-white rounded-2xl font-black active:scale-95 transition-all flex items-center justify-center gap-2 ${isSyncing || !syncIdInput.trim() ? 'opacity-30' : ''}`}
+                >
+                  {isSyncing ? <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> : '📥'}
+                  下载并覆盖本地数据
+                </button>
+              </div>
+            </div>
+            
+            {syncStatus === 'success' && <p className="text-center text-[10px] text-green-500 font-black mt-4 animate-bounce">✨ 同步成功</p>}
+            {syncStatus === 'error' && <p className="text-center text-[10px] text-red-500 font-black mt-4">❌ 同步失败，请重试</p>}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
