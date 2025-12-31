@@ -44,7 +44,7 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
   }
 }
 
-// 修正后的模型名称
+// 确保使用稳定的模型名称
 const TARGET_MODEL = 'gemini-flash-lite-latest';
 
 // 高考英语语法题 JSON 结构定义
@@ -76,7 +76,8 @@ export const generateGrammarQuestions = async (
   return withRetry(async () => {
     const ai = new GoogleGenAI({ apiKey });
     const pointsDesc = targetPoints.length > 0 ? `专项考点：${targetPoints.join('、')}。` : "涵盖高中核心考点。";
-    const prompt = `你是高考英语专家。请生成 ${count} 道单项填空题，难度：${difficulty}。${pointsDesc} 要求：符合高考命题逻辑，解析详尽且含翻译。返回标准 JSON 数组。`;
+    // 明确要求中文解析
+    const prompt = `你是高考英语专家。请生成 ${count} 道单项填空题，难度：${difficulty}。${pointsDesc} 要求：符合高考命题逻辑，请务必使用中文提供详尽的解析且含翻译。返回标准 JSON 数组。`;
 
     const response = await ai.models.generateContent({
       model: TARGET_MODEL,
@@ -101,7 +102,8 @@ export const askFollowUpQuestion = async (
 
   return withRetry(async () => {
     const ai = new GoogleGenAI({ apiKey });
-    const contextPrompt = `针对高考英语题：${questionContext.question}\n正确答案：${questionContext.options[questionContext.answerIndex]}\n学生疑问：${userQuery}\n请作为名师提供简洁、易懂的回答。`;
+    // 明确要求中文答疑
+    const contextPrompt = `针对高考英语题：${questionContext.question}\n正确答案：${questionContext.options[questionContext.answerIndex]}\n学生疑问：${userQuery}\n请作为名师提供简洁、易懂的中文回答。不要使用英文回复（除非是举例）。`;
     const response = await ai.models.generateContent({
       model: TARGET_MODEL,
       contents: contextPrompt,
@@ -120,7 +122,14 @@ export const getGrammarDeepDive = async (
 
   return withRetry(async () => {
     const ai = new GoogleGenAI({ apiKey });
-    const prompt = `深入讲解考点：“${pointName}”。参考学生之前的错题：${wrongQuestions.slice(0, 3).map(q => q.question).join('|')}。返回包含 lecture(核心逻辑), mistakeAnalysis(针对性错因), tips(3条避坑指南) 的 JSON。`;
+    // 重点：要求 JSON 内容必须是中文
+    const prompt = `深入讲解考点：“${pointName}”。参考学生之前的错题：${wrongQuestions.slice(0, 3).map(q => q.question).join('|')}。
+    要求：
+    1. 所有返回的内容（lecture, mistakeAnalysis, tips）必须全部使用中文。
+    2. lecture 需包含核心语法逻辑。
+    3. mistakeAnalysis 需分析学生为什么会错。
+    4. tips 提供3条避坑指南。
+    返回标准 JSON 对象。`;
     
     const response = await ai.models.generateContent({
       model: TARGET_MODEL,
