@@ -13,24 +13,56 @@ const App: React.FC = () => {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [results, setResults] = useState<QuizResults | null>(null);
   const [loadingMsg, setLoadingMsg] = useState('');
-  const [userStats, setUserStats] = useState<UserStats>({ wrongCounts: {}, wrongHistory: [] });
+  const [userStats, setUserStats] = useState<UserStats>({ 
+    wrongCounts: {}, 
+    wrongHistory: [], 
+    savedHistory: [] 
+  });
   const [showQuotaModal, setShowQuotaModal] = useState(false);
   const [errorType, setErrorType] = useState<'RPM' | 'KEY' | 'MODEL'>('RPM');
-  const [reviewInitialTab, setReviewInitialTab] = useState<'summary' | 'details'>('summary');
+  const [reviewInitialTab, setReviewInitialTab] = useState<'summary' | 'details' | 'saved'>('summary');
 
   useEffect(() => {
     const saved = localStorage.getItem('gaokao_stats_v2');
-    if (saved) setUserStats(JSON.parse(saved));
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      setUserStats({
+        ...parsed,
+        savedHistory: parsed.savedHistory || []
+      });
+    }
   }, []);
 
-  const saveStats = (wrongPoints: string[], wrongQuestions: WrongQuestion[]) => {
+  const saveStatsToStorage = (updatedStats: UserStats) => {
+    setUserStats(updatedStats);
+    localStorage.setItem('gaokao_stats_v2', JSON.stringify(updatedStats));
+  };
+
+  const handleAnswerSubmitted = (question: Question, userAnswerIndex: number) => {
+    if (userAnswerIndex !== question.answerIndex) {
+      const newStats = { ...userStats };
+      const point = question.grammarPoint;
+      newStats.wrongCounts[point] = (newStats.wrongCounts[point] || 0) + 1;
+      const wrongEntry: WrongQuestion = {
+        ...question,
+        userAnswerIndex,
+        timestamp: Date.now()
+      };
+      const filteredHistory = newStats.wrongHistory.filter(q => q.question !== question.question);
+      newStats.wrongHistory = [wrongEntry, ...filteredHistory].slice(0, 100);
+      saveStatsToStorage(newStats);
+    }
+  };
+
+  const toggleSaveQuestion = (question: Question, userAnswerIndex: number) => {
     const newStats = { ...userStats };
-    wrongPoints.forEach(pt => {
-      newStats.wrongCounts[pt] = (newStats.wrongCounts[pt] || 0) + 1;
-    });
-    newStats.wrongHistory = [...wrongQuestions, ...newStats.wrongHistory].slice(0, 50);
-    setUserStats(newStats);
-    localStorage.setItem('gaokao_stats_v2', JSON.stringify(newStats));
+    const isSaved = newStats.savedHistory.some(q => q.question === question.question);
+    if (isSaved) {
+      newStats.savedHistory = newStats.savedHistory.filter(q => q.question !== question.question);
+    } else {
+      newStats.savedHistory = [{ ...question, userAnswerIndex, timestamp: Date.now() }, ...newStats.savedHistory].slice(0, 50);
+    }
+    saveStatsToStorage(newStats);
   };
 
   const startQuiz = async (count: number, difficulty: Difficulty, points: string[]) => {
@@ -43,7 +75,6 @@ const App: React.FC = () => {
     } catch (error: any) {
       console.error("Quiz Generation Error:", error);
       const errorMsg = error.message || "";
-      
       if (errorMsg === "API_KEY_MISSING") {
         setErrorType('KEY');
         setShowQuotaModal(true);
@@ -54,7 +85,6 @@ const App: React.FC = () => {
         setErrorType('RPM');
         setShowQuotaModal(true);
       } else {
-        // 尝试解析可能的 JSON 错误
         let readableError = errorMsg;
         try {
           if (errorMsg.startsWith('{')) {
@@ -71,23 +101,13 @@ const App: React.FC = () => {
   const finishQuiz = (userAnswers: number[]) => {
     let score = 0;
     const wrongPoints: string[] = [];
-    const newWrongEntries: WrongQuestion[] = [];
-
     userAnswers.forEach((ans, idx) => {
       if (ans === questions[idx].answerIndex) {
         score++;
       } else {
         wrongPoints.push(questions[idx].grammarPoint);
-        newWrongEntries.push({
-          ...questions[idx],
-          userAnswerIndex: ans,
-          timestamp: Date.now()
-        });
       }
     });
-
-    if (newWrongEntries.length > 0) saveStats(wrongPoints, newWrongEntries);
-    
     setResults({ 
       score, 
       total: questions.length, 
@@ -106,9 +126,8 @@ const App: React.FC = () => {
 
   const clearHistory = () => {
     if (confirm('确定要清空错题本吗？')) {
-      const reset = { wrongCounts: {}, wrongHistory: [] };
-      setUserStats(reset);
-      localStorage.setItem('gaokao_stats_v2', JSON.stringify(reset));
+      const reset = { wrongCounts: {}, wrongHistory: [], savedHistory: [] };
+      saveStatsToStorage(reset);
     }
   };
 
@@ -117,17 +136,13 @@ const App: React.FC = () => {
     setQuestions([]);
   };
 
-  const handleGoToReview = (tab: 'summary' | 'details' = 'summary') => {
+  const handleGoToReview = (tab: 'summary' | 'details' | 'saved' = 'summary') => {
     setReviewInitialTab(tab);
     setView(AppState.REVIEW);
   };
 
-  const handleStartSpecialized = (point: string) => {
-    startQuiz(10, '中等', [point]);
-  };
-
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col max-w-md mx-auto relative overflow-hidden shadow-2xl">
+    <div className="h-[100dvh] bg-gray-50 flex flex-col max-w-md mx-auto relative overflow-hidden shadow-2xl">
       {view === AppState.HOME && (
         <HomeView 
           onStart={startQuiz} 
@@ -144,7 +159,10 @@ const App: React.FC = () => {
           onQuotaError={() => {
             setErrorType('RPM');
             setShowQuotaModal(true);
-          }} 
+          }}
+          onAnswerSubmitted={handleAnswerSubmitted}
+          onToggleSave={toggleSaveQuestion}
+          savedHistory={userStats.savedHistory}
         />
       )}
       {view === AppState.RESULT && results && (
@@ -153,9 +171,10 @@ const App: React.FC = () => {
       {view === AppState.REVIEW && (
         <ReviewView 
           history={userStats.wrongHistory} 
+          savedHistory={userStats.savedHistory}
           onBack={() => setView(AppState.HOME)} 
           onClear={clearHistory} 
-          onStartQuiz={handleStartSpecialized}
+          onStartQuiz={(point) => startQuiz(10, '中等', [point])}
           initialTab={reviewInitialTab}
         />
       )}
@@ -177,21 +196,18 @@ const App: React.FC = () => {
                    <p className="text-[10px] text-red-600/70 leading-relaxed">Vercel 的 API_KEY 变量未生效。请确保已添加变量并点击了 **Redeploy**。</p>
                 </div>
               )}
-
               {errorType === 'MODEL' && (
                 <div className="p-3 bg-orange-50 rounded-xl border border-orange-100">
                    <p className="text-[11px] font-bold text-orange-700 mb-1">模型路径错误</p>
                    <p className="text-[10px] text-orange-600/70 leading-relaxed">AI 模型名称在当前区域不可用。已尝试自动修复，请重新点击开始。</p>
                 </div>
               )}
-
               {errorType === 'RPM' && (
                 <div className="p-3 bg-indigo-50 rounded-xl border border-indigo-100">
                    <p className="text-[11px] font-black text-indigo-700 mb-1">频率限制 (RPM)</p>
                    <p className="text-[10px] text-indigo-600/70 leading-relaxed">免费版 AI 每分钟限 15 次。刚才请求太密集了，请静候 30 秒再点击开始。</p>
                 </div>
               )}
-              
               <div className="p-3 bg-amber-50 rounded-xl border border-amber-100">
                  <p className="text-[11px] font-bold text-amber-700 mb-1">解决办法</p>
                  <p className="text-[10px] text-amber-600/70 leading-relaxed">

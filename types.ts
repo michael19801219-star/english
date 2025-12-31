@@ -35,6 +35,7 @@ export interface WrongQuestion extends Question {
 export interface UserStats {
   wrongCounts: Record<string, number>;
   wrongHistory: WrongQuestion[];
+  savedHistory: WrongQuestion[]; // 新增：用户主动收藏的题目
 }
 
 export interface ChatMessage {

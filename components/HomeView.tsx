@@ -5,7 +5,7 @@ import { UserStats, Difficulty, GRAMMAR_POINTS } from '../types';
 interface HomeViewProps {
   onStart: (count: number, difficulty: Difficulty, points: string[]) => void;
   stats: UserStats;
-  onGoToReview: (tab?: 'summary' | 'details') => void;
+  onGoToReview: (tab?: 'summary' | 'details' | 'saved') => void;
 }
 
 const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview }) => {
@@ -47,24 +47,38 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview }) => 
           </div>
         </div>
         
-        <div className="flex gap-3">
+        <div className="flex gap-2">
+          <button 
+            onClick={() => onGoToReview('saved')}
+            className="bg-white/90 backdrop-blur-md p-3 rounded-[20px] shadow-sm border border-gray-100 flex flex-col items-center relative active:scale-90 transition-all"
+            title="我的收藏"
+          >
+            <span className="text-xl">⭐</span>
+            <span className="text-[8px] font-black text-gray-400 mt-1 uppercase tracking-tighter">收藏本</span>
+            {stats.savedHistory?.length > 0 && (
+              <span className="absolute -top-1 -right-1 bg-amber-500 text-white text-[8px] w-4 h-4 rounded-full flex items-center justify-center border border-white font-black">
+                {stats.savedHistory.length}
+              </span>
+            )}
+          </button>
+
           <button 
             onClick={() => onGoToReview('summary')}
-            className="bg-white/90 backdrop-blur-md p-4 rounded-[24px] shadow-sm border border-gray-100 flex flex-col items-center relative active:scale-90 transition-all hover:shadow-lg"
+            className="bg-white/90 backdrop-blur-md p-3 rounded-[20px] shadow-sm border border-gray-100 flex flex-col items-center relative active:scale-90 transition-all"
             title="考点笔记"
           >
-            <span className="text-2xl">📜</span>
-            <span className="text-[9px] font-black text-gray-400 mt-1 uppercase tracking-widest">知识笔记</span>
+            <span className="text-xl">📜</span>
+            <span className="text-[8px] font-black text-gray-400 mt-1 uppercase tracking-tighter">知识笔记</span>
           </button>
 
           <button 
             onClick={() => onGoToReview('details')}
-            className="bg-white/90 backdrop-blur-md p-4 rounded-[24px] shadow-sm border border-gray-100 flex flex-col items-center relative active:scale-90 transition-all hover:shadow-lg"
+            className="bg-white/90 backdrop-blur-md p-3 rounded-[20px] shadow-sm border border-gray-100 flex flex-col items-center relative active:scale-90 transition-all"
           >
-            <span className="text-2xl">📕</span>
-            <span className="text-[9px] font-black text-gray-400 mt-1 uppercase tracking-widest">错题历史</span>
+            <span className="text-xl">📕</span>
+            <span className="text-[8px] font-black text-gray-400 mt-1 uppercase tracking-tighter">错题历史</span>
             {stats.wrongHistory.length > 0 && (
-              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] w-5 h-5 rounded-full flex items-center justify-center border-2 border-white font-black">
+              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[8px] w-4 h-4 rounded-full flex items-center justify-center border border-white font-black">
                 {stats.wrongHistory.length}
               </span>
             )}
