@@ -2,39 +2,46 @@
 import { UserStats, WrongQuestion } from "../types";
 
 /**
- * 离线备份方案：采用 Base64 编码将错题数据转为可复制的字符串
+ * 极限压缩备份方案：为了兼容微信发送，对非核心数据进行大幅截断和精简
  */
 
 /**
- * 数据压缩：极限压缩体积，确保 100% 兼容文本传输
+ * 数据压缩
  */
 const compressData = (stats: UserStats): string => {
   const simplify = (q: WrongQuestion) => [
-    q.question.slice(0, 150),
+    q.question.slice(0, 80), // 深度截断题目
     q.options,
     q.answerIndex,
-    q.explanation.slice(0, 200),
+    q.explanation.slice(0, 100), // 深度截断解析
     q.grammarPoint,
     q.userAnswerIndex,
-    q.timestamp,
-    q.translation
+    Math.floor(q.timestamp / 1000), // 降级为秒级时间戳
+    q.translation?.slice(0, 40) // 深度截断翻译
   ];
   
+  // 仅保留最近 14 天的每日数据，防止长年累月的数据导致代码无限增长
+  const dailyKeys = Object.keys(stats.dailyStats || {}).sort().reverse().slice(0, 14);
+  const miniDaily: Record<string, any> = {};
+  dailyKeys.forEach(k => {
+    miniDaily[k] = stats.dailyStats[k];
+  });
+
   const payload = {
     c: stats.wrongCounts,
-    w: stats.wrongHistory.slice(0, 50).map(simplify),
-    s: stats.savedHistory.slice(0, 30).map(simplify),
-    tqa: stats.totalQuestionsAttempted,
-    tca: stats.totalCorrectAnswers,
-    tst: stats.totalStudyTime,
-    ds: stats.dailyStats,
-    v: "5.0_MANUAL",
-    t: Date.now()
+    w: stats.wrongHistory.slice(0, 12).map(simplify), // 仅保留最近 12 条错题
+    s: stats.savedHistory.slice(0, 8).map(simplify),  // 仅保留最近 8 条收藏
+    qa: stats.totalQuestionsAttempted,
+    ca: stats.totalCorrectAnswers,
+    st: stats.totalStudyTime,
+    ds: miniDaily,
+    v: "6.0_MINI", // 版本标记
+    t: Math.floor(Date.now() / 1000)
   };
   
   try {
     const jsonString = JSON.stringify(payload);
-    // 使用健壮的 Unicode 安全 Base64 方案
+    // 使用 Unicode 安全的 Base64 编码
     return btoa(encodeURIComponent(jsonString).replace(/%([0-9A-F]{2})/g, (match, p1) => 
       String.fromCharCode(parseInt(p1, 16))
     ));
@@ -63,7 +70,7 @@ const decompressData = (base64: string): UserStats | null => {
       grammarPoint: q[4], 
       difficulty: '中等', 
       userAnswerIndex: q[5], 
-      timestamp: q[6],
+      timestamp: q[6] * 1000, // 还原为毫秒
       translation: q[7]
     });
 
@@ -71,11 +78,11 @@ const decompressData = (base64: string): UserStats | null => {
       wrongCounts: data.c || {},
       wrongHistory: (data.w || []).map(restore),
       savedHistory: (data.s || []).map(restore),
-      totalQuestionsAttempted: data.tqa || 0,
-      totalCorrectAnswers: data.tca || 0,
-      totalStudyTime: data.tst || 0,
+      totalQuestionsAttempted: data.qa || 0,
+      totalCorrectAnswers: data.ca || 0,
+      totalStudyTime: data.st || 0,
       dailyStats: data.ds || {},
-      lastSyncTime: data.t
+      lastSyncTime: data.t * 1000
     };
   } catch (e) {
     console.error("Decompression failed", e);
