@@ -7,9 +7,9 @@ interface ReviewViewProps {
   history: WrongQuestion[];
   savedHistory: WrongQuestion[];
   onBack: () => void;
-  onClear: () => void;
-  onDeleteWrong: (questionText: string) => void;
-  onDeleteSaved: (questionText: string) => void;
+  onClear: (type: 'details' | 'saved') => void;
+  onDeleteWrong: (timestamp: number) => void;
+  onDeleteSaved: (timestamp: number) => void;
   onStartQuiz: (point: string) => void;
   initialTab?: 'summary' | 'details' | 'saved';
 }
@@ -165,12 +165,17 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
     }
   };
 
-  const handleDeleteItem = (e: React.MouseEvent, questionText: string) => {
+  const handleDeleteItem = (e: React.MouseEvent, timestamp: number) => {
     e.stopPropagation();
-    if (confirm("确定要删除这条记录吗？")) {
-      if (activeTab === 'details') onDeleteWrong(questionText);
-      else onDeleteSaved(questionText);
+    if (confirm("确定要从列表中移除这条记录吗？")) {
+      if (activeTab === 'details') onDeleteWrong(timestamp);
+      else onDeleteSaved(timestamp);
     }
+  };
+
+  const handleClearCurrent = () => {
+    if (activeTab === 'details') onClear('details');
+    else if (activeTab === 'saved') onClear('saved');
   };
 
   return (
@@ -188,7 +193,7 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
           </div>
           <div className="flex items-center gap-2">
             {(activeTab === 'details' && history.length > 0) || (activeTab === 'saved' && savedHistory.length > 0) ? (
-              <button onClick={onClear} className="px-4 py-2 text-[11px] font-black text-red-400 bg-red-50 rounded-xl active:opacity-60">清空当前页</button>
+              <button onClick={handleClearCurrent} className="px-4 py-2 text-[11px] font-black text-red-400 bg-red-50 rounded-xl active:scale-95 transition-all">清空当前页</button>
             ) : null}
           </div>
         </header>
@@ -315,12 +320,12 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
                           const uniqueId = `${q.question}-${idx}-${gIdx}`;
                           const isChatting = activeChatId === uniqueId;
                           return (
-                            <div key={idx} className="bg-white p-6 rounded-[28px] border border-gray-100 shadow-sm relative ml-2 group">
+                            <div key={idx} className="bg-white p-6 rounded-[28px] border border-gray-100 shadow-sm relative ml-2">
                               <div className="flex items-center justify-between mb-4">
                                 <span className={`px-2 py-1 text-[10px] font-black rounded-lg border ${getDifficultyColor(q.difficulty)}`}>{q.difficulty || '中等'}</span>
                                 <button 
-                                  onClick={(e) => handleDeleteItem(e, q.question)}
-                                  className="w-8 h-8 flex items-center justify-center rounded-full bg-red-50 text-red-400 opacity-0 group-hover:opacity-100 transition-opacity active:scale-90"
+                                  onClick={(e) => handleDeleteItem(e, q.timestamp)}
+                                  className="w-8 h-8 flex items-center justify-center rounded-full bg-red-50 text-red-400 transition-all active:scale-95 shadow-sm"
                                 >
                                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                                 </button>

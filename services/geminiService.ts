@@ -5,17 +5,11 @@ import { Question, Difficulty, ChatMessage, WrongQuestion } from "../types";
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function withRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
-  // 预检 API KEY
-  if (!process.env.API_KEY) {
-    throw new Error("API_KEY_MISSING");
-  }
-
   try {
     return await fn();
   } catch (error: any) {
     const errorStr = JSON.stringify(error).toLowerCase();
     
-    // 处理 404 错误（模型名称错误）
     if (errorStr.includes('404') || errorStr.includes('not_found')) {
       throw new Error("MODEL_NOT_FOUND");
     }
@@ -32,12 +26,6 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
     }
     
     if (isQuotaError) throw new Error("QUOTA_EXCEEDED");
-    
-    // 如果 SDK 抛出 Key 相关的原始错误也进行转换
-    if (error.message && error.message.includes("API Key")) {
-      throw new Error("API_KEY_MISSING");
-    }
-
     throw error;
   }
 }
@@ -67,6 +55,7 @@ export const generateGrammarQuestions = async (
   difficulty: Difficulty
 ): Promise<Question[]> => {
   return withRetry(async () => {
+    // 直接使用 process.env.API_KEY，系统会自动注入
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
     const pointsDesc = targetPoints.length > 0 ? `专项考点：${targetPoints.join('、')}。` : "涵盖高中核心考点。";
     
