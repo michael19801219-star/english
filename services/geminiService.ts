@@ -1,17 +1,17 @@
 
-// DO NOT use or import the types below from `@google/genai`; these are deprecated APIs and no longer work.
 import { GoogleGenAI, Type } from "@google/genai";
 import { Question, Difficulty, ChatMessage, WrongQuestion } from "../types";
 
-const getAI = () => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey || apiKey === "undefined" || apiKey === "") throw new Error("API_KEY_MISSING");
-  return new GoogleGenAI({ apiKey });
+// 兼容多种环境变量写法，确保 Vercel 注入成功
+const getApiKey = () => {
+  const key = process.env.API_KEY;
+  if (!key || key === "undefined" || key === "") return null;
+  return key;
 };
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-async function withRetry<T>(fn: () => Promise<T>, retries = 2): Promise<T> {
+async function withRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
   try {
     return await fn();
   } catch (error: any) {
@@ -21,16 +21,15 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 2): Promise<T> {
                         errorStr.includes('exhausted') ||
                         (error.message && error.message.includes('429'));
 
-    if (isQuotaError) {
-      if (retries > 0) {
-        // 遇到配额限制，增加等待时间 (3s, 7s)
-        const waitTime = retries === 2 ? 3000 : 7000;
-        await delay(waitTime);
-        return withRetry(fn, retries - 1);
-      }
-      // 重试次数用完，抛出统一的配额错误
-      throw new Error("QUOTA_EXCEEDED");
+    if (isQuotaError && retries > 0) {
+      // 阶梯式重试：3s -> 6s -> 12s
+      const waitTime = (4 - retries) * 3000;
+      console.log(`检测到频率限制，${waitTime/1000}秒后进行第 ${4-retries} 次重试...`);
+      await delay(waitTime);
+      return withRetry(fn, retries - 1);
     }
+    
+    if (isQuotaError) throw new Error("QUOTA_EXCEEDED");
     throw error;
   }
 }
@@ -57,8 +56,11 @@ export const generateGrammarQuestions = async (
   targetPoints: string[], 
   difficulty: Difficulty
 ): Promise<Question[]> => {
+  const apiKey = getApiKey();
+  if (!apiKey) throw new Error("API_KEY_MISSING");
+
   return withRetry(async () => {
-    const ai = getAI();
+    const ai = new GoogleGenAI({ apiKey });
     const pointsDesc = targetPoints.length > 0 ? `专项考点：${targetPoints.join('、')}。` : "全考点。";
     const prompt = `生成 ${count} 道高考英语语法单选题，难度：${difficulty}。${pointsDesc} 解析需包含翻译。返回纯 JSON。`;
 
@@ -79,8 +81,11 @@ export const askFollowUpQuestion = async (
   history: ChatMessage[],
   userQuery: string
 ): Promise<string> => {
+  const apiKey = getApiKey();
+  if (!apiKey) throw new Error("API_KEY_MISSING");
+
   return withRetry(async () => {
-    const ai = getAI();
+    const ai = new GoogleGenAI({ apiKey });
     const contextPrompt = `针对题目：${questionContext.question}，回答学生疑问：${userQuery}。简洁专业。`;
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
@@ -94,8 +99,11 @@ export const getGrammarDeepDive = async (
   pointName: string,
   wrongQuestions: WrongQuestion[]
 ): Promise<{ lecture: string; mistakeAnalysis: string; tips: string[] }> => {
+  const apiKey = getApiKey();
+  if (!apiKey) throw new Error("API_KEY_MISSING");
+
   return withRetry(async () => {
-    const ai = getAI();
+    const ai = new GoogleGenAI({ apiKey });
     const prompt = `分析考点“${pointName}”。错题参考：${wrongQuestions.map(q => q.question).join('|')}。返回核心逻辑、错因、3条Tips的JSON。`;
     
     const response = await ai.models.generateContent({
