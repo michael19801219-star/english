@@ -213,8 +213,8 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
                             <div className="p-5 bg-green-50/50 rounded-2xl border border-green-100/30">
                               <h6 className="text-[10px] font-black text-green-700 uppercase mb-2">提分技巧</h6>
                               <ul className="space-y-2">
-                                {/* 显式转换为 string[] 确保 map 方法可用 */}
-                                {diveData.tips && Array.isArray(diveData.tips) && (diveData.tips as string[]).map((tip: string, i: number) => (
+                                {/* FIXED: Explicitly cast diveData.tips to string[] to resolve the 'unknown' error */}
+                                {Array.isArray(diveData.tips) && (diveData.tips as string[]).map((tip: string, i: number) => (
                                   <li key={i} className="text-[13px] text-green-900 leading-relaxed font-bold flex gap-2">
                                     <span className="text-green-400">#</span> {tip}
                                   </li>
@@ -254,7 +254,8 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
                   </div>
                   {items.map((q) => {
                     const isChatting = activeChatId === q.timestamp;
-                    const qChatHistory = chatHistories[q.timestamp] || [];
+                    // FIXED: Explicitly type qChatHistory to prevent it being inferred as unknown
+                    const qChatHistory: ChatMessage[] = chatHistories[q.timestamp] || [];
                     
                     return (
                       <div key={q.timestamp} className="bg-white rounded-[32px] border border-gray-100 shadow-sm relative overflow-hidden group">
@@ -301,6 +302,7 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
                                   这题哪里不明白？或者想知道相关的变式题？直接问我！
                                 </p>
                               )}
+                              {/* FIXED: Using typed qChatHistory to avoid mapping on 'unknown' */}
                               {qChatHistory.map((msg, idx) => (
                                 <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                                   <div className={`max-w-[85%] p-4 rounded-[22px] text-[13px] font-medium leading-relaxed ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-br-none' : 'bg-white text-gray-700 rounded-bl-none shadow-sm border border-indigo-50'}`}>
