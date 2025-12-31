@@ -9,31 +9,45 @@ interface QuizViewProps {
   onCancel: () => void;
 }
 
+/**
+ * 基础 Base64 解码为字节数组
+ */
 function decodeBase64(base64: string): Uint8Array {
-  try {
-    const binaryString = atob(base64);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    return bytes;
-  } catch (e) {
-    return new Uint8Array(0);
+  const binaryString = atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
   }
+  return bytes;
 }
 
-async function decodeAudioData(data: Uint8Array, ctx: AudioContext, sampleRate: number): Promise<AudioBuffer | null> {
+/**
+ * 将 Gemini 返回的原始 16-bit PCM 数据解码为 AudioBuffer
+ */
+async function decodeAudioData(
+  data: Uint8Array,
+  ctx: AudioContext,
+  sampleRate: number,
+  numChannels: number = 1
+): Promise<AudioBuffer | null> {
   if (data.length < 2) return null;
   try {
-    const length = Math.floor(data.byteLength / 2) * 2;
-    const buffer = ctx.createBuffer(1, length / 2, sampleRate);
-    const channelData = buffer.getChannelData(0);
-    const dataView = new DataView(data.buffer, data.byteOffset, length);
-    for (let i = 0; i < length / 2; i++) {
-      channelData[i] = dataView.getInt16(i * 2, true) / 32768.0;
+    // Gemini TTS 返回的是 16位 小端序 PCM
+    const dataInt16 = new Int16Array(data.buffer, data.byteOffset, data.byteLength / 2);
+    const frameCount = dataInt16.length / numChannels;
+    const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
+
+    for (let channel = 0; channel < numChannels; channel++) {
+      const channelData = buffer.getChannelData(channel);
+      for (let i = 0; i < frameCount; i++) {
+        // 线性归一化到 [-1, 1]
+        channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
+      }
     }
     return buffer;
   } catch (e) {
+    console.error("PCM Decoding Error:", e);
     return null;
   }
 }
@@ -58,11 +72,10 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) =>
   const audioContextRef = useRef<AudioContext | null>(null);
   const recognitionRef = useRef<any>(null);
   
-  // 断点续传核心引用
+  // 核心引用
   const audioCacheRef = useRef<Map<string, AudioBuffer>>(new Map());
   const activeSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const stopRequestedRef = useRef<boolean>(false);
-  // 记录每个消息播放到的分片索引
   const playbackProgressRef = useRef<Map<number, number>>(new Map());
 
   useEffect(() => {
@@ -105,19 +118,14 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) =>
     setIsTTSLoading(false);
   };
 
-  /**
-   * 文本切分：每段控制在100字左右，确保TTS返回快且断点精准
-   */
   const splitTextIntoChunks = (text: string): string[] => {
-    // 按句号、问号、感叹号、换行符切分，同时保留标点
     const segments = text.split(/([.?!。？！\n]+)/);
     const chunks: string[] = [];
     let currentChunk = "";
 
     for (let i = 0; i < segments.length; i++) {
       currentChunk += segments[i];
-      // 如果当前累计超过 100 字，或者到了最后，则封为一个包
-      if (currentChunk.length > 100 || i === segments.length - 1) {
+      if (currentChunk.length > 80 || i === segments.length - 1) {
         if (currentChunk.trim()) {
           chunks.push(currentChunk.trim());
         }
@@ -128,38 +136,36 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) =>
   };
 
   const playTTS = async (fullText: string, msgIdx: number) => {
-    // 如果正在播放当前点击的消息，则视为“暂停”
     if (playingMsgIdx === msgIdx) {
-      stopAllAudio(false); // 停止播放，但不重置进度指针
+      stopAllAudio(false);
       return;
     }
     
-    // 如果点击新消息，或者在暂停后点击播放
     stopAllAudio(false); 
     stopRequestedRef.current = false;
     setPlayingMsgIdx(msgIdx);
     
     try {
+      // 必须在用户点击事件中初始化 AudioContext，并指定采样率为 24000
       if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({
+          sampleRate: 24000
+        });
       }
+      
       const ctx = audioContextRef.current;
-      if (ctx.state === 'suspended') await ctx.resume();
+      if (ctx.state === 'suspended') {
+        await ctx.resume();
+      }
 
       const chunks = splitTextIntoChunks(fullText);
-      // 获取当前播放进度指针 (如果该消息没播过，从0开始)
       let startIndex = playbackProgressRef.current.get(msgIdx) || 0;
-      
-      // 如果上次已经播完了，则重新从0开始
-      if (startIndex >= chunks.length) {
-        startIndex = 0;
-      }
+      if (startIndex >= chunks.length) startIndex = 0;
 
-      // 递归顺序播放函数
       const playSequential = async (index: number) => {
         if (index >= chunks.length || stopRequestedRef.current) {
           if (index >= chunks.length) {
-            playbackProgressRef.current.set(msgIdx, 0); // 全部播完，重置指针
+            playbackProgressRef.current.set(msgIdx, 0); 
             setPlayingMsgIdx(null);
           }
           return;
@@ -167,11 +173,8 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) =>
 
         const text = chunks[index];
         let buffer: AudioBuffer | null = null;
-
-        // 记录当前尝试播放的索引
         playbackProgressRef.current.set(msgIdx, index);
 
-        // 缓存检测
         if (audioCacheRef.current.has(text)) {
           buffer = audioCacheRef.current.get(text)!;
         } else {
@@ -180,10 +183,11 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) =>
             const base64 = await generateTTS(text);
             if (stopRequestedRef.current) return;
             const bytes = decodeBase64(base64);
+            // 指定解码采样率为 24000
             buffer = await decodeAudioData(bytes, ctx, 24000);
             if (buffer) audioCacheRef.current.set(text, buffer);
           } catch (err) {
-            console.error("Chunk synthesis failed", err);
+            console.error("Audio Chunk Sync Error:", err);
           }
         }
 
@@ -197,19 +201,18 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) =>
           
           source.onended = () => {
             if (!stopRequestedRef.current) {
-              playSequential(index + 1); // 自动进入下一段
+              playSequential(index + 1);
             }
           };
           source.start(0);
         } else if (!stopRequestedRef.current) {
-          // 如果某一段加载失败，跳过播下一段
           playSequential(index + 1);
         }
       };
 
       await playSequential(startIndex);
-
     } catch (e) {
+      console.error("TTS Playback Fatal Error:", e);
       setIsTTSLoading(false);
       setPlayingMsgIdx(null);
     }
@@ -245,7 +248,6 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) =>
     else onFinish(newAnswers);
   };
 
-  // 计算是否有播放进度
   const getProgressLabel = (msgIdx: number, fullText: string) => {
     const chunks = splitTextIntoChunks(fullText);
     const progress = playbackProgressRef.current.get(msgIdx) || 0;
@@ -273,7 +275,7 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) =>
       <header className="mb-6 flex-shrink-0">
         <div className="flex justify-between items-center mb-4">
           <div className="flex flex-col">
-            <span className="text-[10px] font-bold text-gray-400 tracking-widest mb-1">GAOKAO MASTER</span>
+            <span className="text-[10px] font-bold text-gray-400 tracking-widest mb-1 uppercase">Gaokao Grammar Pro</span>
             <span className="text-sm font-black text-indigo-600">第 {currentIndex + 1} 题 / 共 {questions.length} 题</span>
           </div>
           <button onClick={() => setIsExiting(true)} className="px-4 py-2 bg-gray-100 text-gray-500 rounded-full text-xs font-black">退出</button>
@@ -324,14 +326,14 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) =>
             <div className="p-6 bg-indigo-50 rounded-[32px] border border-indigo-100 flex flex-col relative overflow-hidden">
               <div className="flex justify-between items-center mb-4">
                 <div className="flex items-center gap-2">
-                   <div className="w-8 h-8 bg-indigo-600 rounded-full flex items-center justify-center text-white text-xs font-black">AI</div>
+                   <div className="w-8 h-8 bg-indigo-600 rounded-full flex items-center justify-center text-white text-xs font-black shadow-inner">AI</div>
                    <h4 className="text-sm font-black text-indigo-900 tracking-tight">AI 助教答疑</h4>
                 </div>
                 {playingMsgIdx !== null && (
-                  <div className="flex items-center gap-1.5 px-3 py-1 bg-white/60 rounded-full border border-indigo-200">
-                    <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse"></span>
+                  <div className="flex items-center gap-1.5 px-3 py-1 bg-indigo-600/10 rounded-full border border-indigo-600/10">
+                    <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-ping"></span>
                     <span className="text-[10px] font-black text-indigo-600 uppercase tracking-tighter">
-                      {isTTSLoading ? "正在合成..." : "朗读中..."}
+                      {isTTSLoading ? "正在载入音频" : "正在朗读解说"}
                     </span>
                   </div>
                 )}
@@ -351,10 +353,10 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) =>
                             )}
                             <button 
                               onClick={() => playTTS(msg.content, idx)}
-                              className={`w-8 h-8 bg-white border border-indigo-100 rounded-full flex items-center justify-center shadow-md active:scale-90 transition-all ${playingMsgIdx === idx ? 'ring-2 ring-indigo-500 bg-indigo-50' : ''}`}
+                              className={`w-9 h-9 bg-white border border-indigo-100 rounded-full flex items-center justify-center shadow-lg active:scale-90 transition-all ${playingMsgIdx === idx ? 'ring-4 ring-indigo-500/20 bg-indigo-50' : ''}`}
                             >
                               {playingMsgIdx === idx ? (
-                                isTTSLoading ? <div className="w-3 h-3 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div> : <span className="text-red-500 text-xs font-black">■</span>
+                                isTTSLoading ? <div className="w-3 h-3 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div> : <span className="text-indigo-600 text-[10px] font-black">⏸</span>
                               ) : (
                                 <span className="text-[14px]">{progressLabel ? '▶️' : '🔊'}</span>
                               )}
@@ -385,9 +387,9 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) =>
                     onChange={(e) => setFollowUpQuery(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && handleAskTutor()}
                     placeholder={isRecognizing ? "正在聆听..." : "有疑问？问问 AI..."}
-                    className={`w-full py-4 pl-5 pr-12 bg-white rounded-2xl border-none text-sm font-black shadow-sm transition-all ${isRecognizing ? 'ring-2 ring-red-400' : ''}`}
+                    className={`w-full py-4 pl-5 pr-12 bg-white rounded-2xl border-none text-sm font-bold shadow-sm transition-all focus:ring-2 focus:ring-indigo-500/20 ${isRecognizing ? 'ring-2 ring-red-400' : ''}`}
                   />
-                  <button onClick={() => recognitionRef.current?.start()} className={`absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full flex items-center justify-center transition-all ${isRecognizing ? 'bg-red-500 text-white animate-bounce' : 'text-gray-400'}`}>🎙️</button>
+                  <button onClick={() => recognitionRef.current?.start()} className={`absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full flex items-center justify-center transition-all ${isRecognizing ? 'bg-red-500 text-white animate-bounce' : 'text-gray-300'}`}>🎙️</button>
                 </div>
                 <button onClick={handleAskTutor} disabled={!followUpQuery.trim() || isAsking} className={`p-4 rounded-2xl shadow-md transition-all ${!followUpQuery.trim() || isAsking ? 'bg-gray-200 text-gray-400' : 'bg-indigo-600 text-white active:scale-90'}`}>
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
@@ -400,9 +402,9 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) =>
 
       <footer className="py-6 flex-shrink-0 safe-area-bottom">
         {!showFeedback ? (
-          <button disabled={selectedOption === null} onClick={() => setShowFeedback(true)} className={`w-full py-4.5 rounded-[24px] font-black text-lg shadow-xl ${selectedOption === null ? 'bg-gray-200 text-gray-400' : 'bg-indigo-600 text-white'}`}>确认提交</button>
+          <button disabled={selectedOption === null} onClick={() => setShowFeedback(true)} className={`w-full py-4.5 rounded-[24px] font-black text-lg shadow-xl transition-all ${selectedOption === null ? 'bg-gray-200 text-gray-400' : 'bg-indigo-600 text-white active:scale-[0.98]'}`}>确认提交</button>
         ) : (
-          <button onClick={handleNext} className="w-full bg-gray-900 text-white py-4.5 rounded-[24px] font-black text-lg shadow-xl flex items-center justify-center gap-2">
+          <button onClick={handleNext} className="w-full bg-gray-900 text-white py-4.5 rounded-[24px] font-black text-lg shadow-xl flex items-center justify-center gap-2 active:scale-[0.98] transition-all">
             <span>{currentIndex === questions.length - 1 ? '完成测试' : '下一题'}</span>
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
           </button>
