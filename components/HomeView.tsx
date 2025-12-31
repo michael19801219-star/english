@@ -52,6 +52,13 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onUpd
     }
   };
 
+  // 获取错题最多的前3个考点
+  // Fix: Explicitly cast counts to number for arithmetic comparison to satisfy TypeScript
+  const topWrongPoints = Object.entries(stats.wrongCounts || {})
+    .sort((a, b) => (b[1] as number) - (a[1] as number))
+    .slice(0, 3)
+    .map(entry => entry[0]);
+
   return (
     <div className="flex-1 flex flex-col bg-gray-50 animate-fadeIn relative">
       <div className="absolute top-[-80px] left-[-40px] w-72 h-72 bg-indigo-200 rounded-full blur-[90px] opacity-30 -z-10"></div>
@@ -79,6 +86,33 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onUpd
         </header>
 
         <div className="space-y-6">
+           {/* 错题巩固专区 - 仅当有错题时显示 */}
+           {topWrongPoints.length > 0 && (
+             <section className="bg-gradient-to-br from-indigo-600 to-violet-700 p-6 rounded-[32px] shadow-lg shadow-indigo-100 animate-fadeIn relative overflow-hidden group">
+               <div className="absolute -right-4 -top-4 w-24 h-24 bg-white/10 rounded-full blur-2xl group-hover:scale-150 transition-transform duration-700"></div>
+               <div className="relative z-10">
+                 <div className="flex justify-between items-start mb-4">
+                   <div>
+                     <h3 className="text-white font-black text-lg tracking-tight">薄弱环节专项巩固</h3>
+                     <p className="text-indigo-100 text-[11px] font-medium opacity-80">根据你的历史错题，AI 已锁定高频失分点</p>
+                   </div>
+                   <span className="text-2xl">🔥</span>
+                 </div>
+                 <div className="flex flex-wrap gap-2 mb-6">
+                   {topWrongPoints.map(p => (
+                     <span key={p} className="px-2.5 py-1 bg-white/20 backdrop-blur-md rounded-lg text-[10px] text-white font-bold border border-white/10">#{p}</span>
+                   ))}
+                 </div>
+                 <button 
+                  onClick={() => onStart(10, '中等', topWrongPoints)}
+                  className="w-full py-3.5 bg-white text-indigo-600 rounded-2xl font-black text-sm shadow-xl active:scale-95 transition-all"
+                 >
+                   立即开启针对性训练
+                 </button>
+               </div>
+             </section>
+           )}
+
            <section className="bg-white/80 backdrop-blur-md p-6 rounded-[32px] border border-white shadow-sm">
              <h3 className="text-[11px] font-black text-gray-400 mb-4 uppercase tracking-widest">练习题量</h3>
              <div className="grid grid-cols-4 gap-2">
