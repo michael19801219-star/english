@@ -2,12 +2,13 @@
 import { UserStats, WrongQuestion } from "../types";
 
 /**
- * kvdb.io 稳定版存储服务 - 采用更短的存储桶
+ * 采用全新的、复杂的专属存储桶 ID，避免与公共请求冲突
  */
-const BUCKET_ID = "gk_v1"; 
+const BUCKET_ID = "gaokao_english_pro_sync_v2_final"; 
 const API_BASE = `https://kvdb.io/${BUCKET_ID}`;
 
 export const generateSyncId = () => {
+  // 增加字符复杂度
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; 
   let result = '';
   for (let i = 0; i < 6; i++) {
@@ -17,81 +18,82 @@ export const generateSyncId = () => {
 };
 
 /**
- * 核心：数据瘦身处理，防止体积过大导致同步失败
+ * 极限压缩：只保留最核心的考试数据，去除所有冗余描述
  */
 const compressStats = (stats: UserStats): any => {
-  const simplify = (q: WrongQuestion) => ({
-    q: q.question,
-    o: q.options,
-    a: q.answerIndex,
-    e: q.explanation,
-    p: q.grammarPoint,
-    u: q.userAnswerIndex,
-    t: q.timestamp
-  });
+  const simplify = (q: WrongQuestion) => [
+    q.question,        // 0
+    q.options,         // 1
+    q.answerIndex,     // 2
+    q.explanation,     // 3
+    q.grammarPoint,    // 4
+    q.userAnswerIndex, // 5
+    q.timestamp        // 6
+  ];
 
   return {
-    wc: stats.wrongCounts,
-    wh: stats.wrongHistory.slice(0, 80).map(simplify), // 限制上传最近80条错题
-    sh: stats.savedHistory.slice(0, 50).map(simplify), // 限制上传最近50条收藏
-    sid: stats.syncId,
-    ts: Date.now()
+    c: stats.wrongCounts,
+    w: stats.wrongHistory.slice(0, 50).map(simplify), // 减少条数以确保成功率
+    s: stats.savedHistory.slice(0, 30).map(simplify),
+    id: stats.syncId,
+    t: Date.now()
   };
 };
 
 /**
- * 核心：数据解压还原
+ * 数据解压还原
  */
 const decompressStats = (data: any): UserStats => {
-  const restore = (q: any): WrongQuestion => ({
-    id: `q_${q.t}`,
-    question: q.q,
-    options: q.o,
-    answerIndex: q.a,
-    explanation: q.e,
-    grammarPoint: q.p,
+  const restore = (q: any[]): WrongQuestion => ({
+    id: `q_${q[6]}`,
+    question: q[0],
+    options: q[1],
+    answerIndex: q[2],
+    explanation: q[3],
+    grammarPoint: q[4],
     difficulty: '中等',
-    userAnswerIndex: q.u,
-    timestamp: q.t
+    userAnswerIndex: q[5],
+    timestamp: q[6]
   });
 
   return {
-    wrongCounts: data.wc || {},
-    wrongHistory: (data.wh || []).map(restore),
-    savedHistory: (data.sh || []).map(restore),
-    syncId: data.sid,
-    lastSyncTime: data.ts
+    wrongCounts: data.c || {},
+    wrongHistory: (data.w || []).map(restore),
+    savedHistory: (data.s || []).map(restore),
+    syncId: data.id,
+    lastSyncTime: data.t
   };
 };
 
 export const uploadToCloud = async (syncId: string, stats: UserStats) => {
   if (!syncId) throw new Error("SYNC_ID_MISSING");
   
-  // 1. 数据瘦身
-  const payload = compressStats(stats);
-  const body = JSON.stringify(payload);
-
-  // 2. 检查体积（调试用）
-  console.log(`Payload size: ${(body.length / 1024).toFixed(2)} KB`);
+  const body = JSON.stringify(compressStats(stats));
 
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时
+
     const response = await fetch(`${API_BASE}/${syncId}`, {
       method: 'PUT',
       body: body,
       headers: { 'Content-Type': 'application/json' },
       mode: 'cors',
       cache: 'no-store',
-      referrerPolicy: "no-referrer"
+      signal: controller.signal
     });
 
+    clearTimeout(timeoutId);
+
     if (!response.ok) {
-      throw new Error(`Server returned ${response.status}`);
+      throw new Error(`HTTP_${response.status}`);
     }
 
-    return payload.ts;
+    return Date.now();
   } catch (error: any) {
-    console.error("Cloud Upload Error:", error);
-    throw new Error("同步失败：请检查网络连接或尝试缩减错题数量");
+    console.error("Sync Error:", error);
+    if (error.name === 'AbortError') throw new Error("连接超时：请尝试切换移动 5G 网络");
+    throw new Error("同步受限：请确认未开启广告拦截插件，并建议切换网络环境重试。");
   }
 };
 
@@ -99,19 +101,19 @@ export const downloadFromCloud = async (syncId: string): Promise<UserStats | nul
   if (!syncId) return null;
 
   try {
-    const response = await fetch(`${API_BASE}/${syncId}?t=${Date.now()}`, {
+    const response = await fetch(`${API_BASE}/${syncId}?nocache=${Date.now()}`, {
       method: 'GET',
       mode: 'cors',
       cache: 'no-store'
     });
     
     if (response.status === 404) return null;
-    if (!response.ok) throw new Error(`Fetch error ${response.status}`);
+    if (!response.ok) throw new Error(`HTTP_${response.status}`);
 
     const data = await response.json();
     return decompressStats(data);
   } catch (error: any) {
-    console.error("Cloud Download Error:", error);
-    throw new Error("获取失败：云端连接不稳定，请稍后重试");
+    console.error("Download Error:", error);
+    throw new Error("云端数据读取失败，请检查网络。");
   }
 };

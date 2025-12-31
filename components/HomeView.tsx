@@ -16,14 +16,12 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onUpd
   const [selectedPoints, setSelectedPoints] = useState<string[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   
-  // 同步状态管理
   const [isSyncOpen, setIsSyncOpen] = useState(false);
   const [syncIdInput, setSyncIdInput] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
   
-  // 自定义下载确认框
   const [downloadConfirm, setDownloadConfirm] = useState<{ isOpen: boolean; data: UserStats | null }>({ isOpen: false, data: null });
 
   const togglePoint = (point: string) => {
@@ -47,9 +45,10 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onUpd
       setSyncStatus('success');
       setTimeout(() => setSyncStatus('idle'), 3000);
     } catch (e: any) {
+      // 记录ID即使上传失败，用户可以后续再试
       onUpdateStats(initialStats);
       setSyncStatus('error');
-      setErrorMsg(e.message || "初始化备份失败");
+      setErrorMsg(e.message);
     } finally {
       setIsSyncing(false);
     }
@@ -77,7 +76,7 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onUpd
     const code = syncIdInput.trim().toUpperCase();
     if (code.length < 6) {
       setSyncStatus('error');
-      setErrorMsg("同步码不足6位");
+      setErrorMsg("请输入完整的6位同步码");
       return;
     }
     
@@ -90,7 +89,7 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onUpd
         setDownloadConfirm({ isOpen: true, data: remoteData });
       } else {
         setSyncStatus('error');
-        setErrorMsg("同步码无效或暂无云端存档");
+        setErrorMsg("此代码对应的云端存档不存在");
       }
     } catch (e: any) {
       setSyncStatus('error');
@@ -107,7 +106,10 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onUpd
       setSyncStatus('success');
       setSyncIdInput('');
       setDownloadConfirm({ isOpen: false, data: null });
-      setTimeout(() => setIsSyncOpen(false), 1500);
+      setTimeout(() => {
+        setIsSyncOpen(false);
+        setSyncStatus('idle');
+      }, 1500);
     }
   };
 
@@ -134,7 +136,7 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onUpd
                 onClick={() => { setIsSyncOpen(true); setSyncStatus('idle'); setErrorMsg(''); }}
                 className="flex items-center gap-2 px-3 py-1.5 bg-white rounded-full shadow-sm border border-gray-100 active:scale-95 transition-all"
               >
-                <span className="text-xs font-medium text-gray-600">{stats.syncId ? '☁️ 已绑定云端' : '☁️ 未开启同步'}</span>
+                <span className="text-xs font-medium text-gray-600">{stats.syncId ? `☁️ 代码: ${stats.syncId}` : '☁️ 开启同步'}</span>
                 <div className={`w-2 h-2 rounded-full ${stats.syncId ? 'bg-green-500' : 'bg-gray-300 animate-pulse'}`}></div>
               </button>
             </div>
@@ -159,7 +161,6 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onUpd
         </header>
 
         <div className="space-y-8">
-          {/* 训练参数设置区 */}
           <section className="bg-white/70 backdrop-blur-sm p-6 rounded-[36px] shadow-sm border border-white">
             <h3 className="text-[11px] font-black text-gray-400 mb-5 uppercase tracking-[0.2em] flex items-center gap-2">
               <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full"></span> 训练题量
@@ -221,7 +222,6 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onUpd
         </div>
       </footer>
 
-      {/* 考点选择模态框 */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-sm flex items-end justify-center p-4 animate-fadeIn" onClick={() => setIsModalOpen(false)}>
           <div className="bg-white w-full max-w-sm rounded-[40px] p-8 shadow-2xl animate-fadeIn" onClick={e => e.stopPropagation()}>
@@ -245,20 +245,19 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onUpd
         </div>
       )}
 
-      {/* 同步控制面板 */}
       {isSyncOpen && (
         <div className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-sm flex items-center justify-center p-6 animate-fadeIn" onClick={() => setIsSyncOpen(false)}>
           <div className="bg-white w-full max-w-sm rounded-[40px] p-8 shadow-2xl" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-2">
-              <h3 className="text-xl font-black text-gray-900">云同步管理</h3>
+              <h3 className="text-xl font-black text-gray-900">云同步专家</h3>
               <button onClick={() => setIsSyncOpen(false)} className="text-gray-300">✕</button>
             </div>
-            <p className="text-[11px] text-gray-400 mb-6 font-medium leading-relaxed">由于空间限制，云同步仅备份最近的错题和收藏记录。</p>
+            <p className="text-[11px] text-gray-400 mb-6 font-medium leading-relaxed">如果同步失败，请尝试**切换为流量(5G)并关闭 WiFi** 后再次操作。</p>
             
             <div className="space-y-6">
               {stats.syncId ? (
                 <div className="p-5 bg-indigo-50/50 rounded-[24px] border border-indigo-100/50 text-center">
-                   <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-2">当前同步码</p>
+                   <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-2">当前同步码（请记下）</p>
                    <p className="text-3xl font-black text-indigo-600 tracking-widest mb-3">{stats.syncId}</p>
                    <button 
                     disabled={isSyncing}
@@ -266,11 +265,8 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onUpd
                     className={`w-full py-3 bg-indigo-600 text-white rounded-xl text-xs font-black shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 ${isSyncing ? 'opacity-50' : ''}`}
                    >
                      {isSyncing ? <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> : '📤'}
-                     {isSyncing ? '上传中...' : '立即备份到云端'}
+                     {isSyncing ? '连接中...' : '备份记录到云端'}
                    </button>
-                   {stats.lastSyncTime && (
-                    <p className="text-[9px] text-indigo-300 mt-2 font-bold">最后备份: {new Date(stats.lastSyncTime).toLocaleString()}</p>
-                   )}
                 </div>
               ) : (
                 <button 
@@ -279,19 +275,19 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onUpd
                   className={`w-full py-4.5 bg-indigo-600 text-white rounded-2xl font-black shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 ${isSyncing ? 'opacity-50' : ''}`}
                 >
                   {isSyncing ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> : '🚀'}
-                  开启云同步功能
+                  开启云端存储
                 </button>
               )}
 
               <div className="relative">
                 <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-100"></div></div>
-                <div className="relative flex justify-center text-[10px] uppercase font-black text-gray-300 bg-white px-2">从其它设备同步</div>
+                <div className="relative flex justify-center text-[10px] uppercase font-black text-gray-300 bg-white px-2">同步已有存档</div>
               </div>
 
               <div className="space-y-3">
                 <input 
                   type="text" 
-                  placeholder="输入6位同步码" 
+                  placeholder="输入6位代码" 
                   value={syncIdInput}
                   maxLength={6}
                   onChange={e => setSyncIdInput(e.target.value.toUpperCase())}
@@ -303,31 +299,35 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onUpd
                   className={`w-full py-3.5 bg-gray-900 text-white rounded-2xl font-black active:scale-95 transition-all flex items-center justify-center gap-2 ${isSyncing || syncIdInput.length < 6 ? 'opacity-30' : ''}`}
                 >
                   {isSyncing ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> : '📥'}
-                  获取并同步
+                  下载云端数据
                 </button>
               </div>
             </div>
             
-            {syncStatus === 'success' && <p className="text-center text-[10px] text-green-500 font-black mt-4 animate-bounce">✨ 交互成功</p>}
+            {syncStatus === 'success' && <p className="text-center text-[10px] text-green-500 font-black mt-4 animate-bounce">✨ 成功！数据已更新</p>}
             {syncStatus === 'error' && (
-              <div className="mt-4 p-3 bg-red-50 rounded-xl border border-red-100">
-                <p className="text-center text-[10px] text-red-500 font-black">❌ {errorMsg}</p>
+              <div className="mt-4 p-4 bg-red-50 rounded-[20px] border border-red-100">
+                <p className="text-center text-[10px] text-red-600 font-black">❌ 同步受限</p>
+                <p className="text-center text-[9px] text-red-400 mt-2 font-medium leading-relaxed">
+                  检测到连接失败。建议：<br/>
+                  1. 关闭手机 WiFi 切换到 5G 流量<br/>
+                  2. 确认未开启任何 VPN 或广告过滤
+                </p>
               </div>
             )}
           </div>
         </div>
       )}
 
-      {/* 同步确认框 */}
       {downloadConfirm.isOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 backdrop-blur-sm p-6 animate-fadeIn">
           <div className="bg-white w-full max-w-sm rounded-[40px] p-8 shadow-2xl animate-fadeIn">
             <div className="text-center mb-6">
               <div className="w-16 h-16 bg-indigo-50 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl">☁️</div>
-              <h3 className="text-xl font-black text-gray-900">确认下载云端存档？</h3>
+              <h3 className="text-xl font-black text-gray-900">同步至本机？</h3>
               <p className="text-xs text-gray-400 mt-2 font-medium leading-relaxed">
-                云端存档包含 {downloadConfirm.data?.wrongHistory.length} 条错题和 {downloadConfirm.data?.savedHistory.length} 条收藏。<br/>
-                <span className="text-red-400 font-black">下载后将覆盖本机当前所有数据。</span>
+                发现云端存档：{downloadConfirm.data?.wrongHistory.length} 错题 / {downloadConfirm.data?.savedHistory.length} 收藏。<br/>
+                <span className="text-red-500 font-bold underline">注意：下载将覆盖您手机上的当前记录！</span>
               </p>
             </div>
             <div className="flex flex-col gap-3">
@@ -335,13 +335,13 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onUpd
                 onClick={executeDownload} 
                 className="w-full py-4.5 bg-indigo-600 text-white rounded-2xl font-black shadow-lg shadow-indigo-100 active:scale-95 transition-all"
               >
-                确认下载并覆盖
+                覆盖并同步
               </button>
               <button 
                 onClick={() => setDownloadConfirm({ isOpen: false, data: null })} 
                 className="w-full py-4.5 bg-gray-50 text-gray-500 rounded-2xl font-bold active:scale-95 transition-all"
               >
-                暂不下载
+                点错了
               </button>
             </div>
           </div>
