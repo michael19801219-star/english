@@ -102,20 +102,27 @@ const App: React.FC = () => {
     if (isProcessing) return;
     setIsProcessing(true);
     setView(AppState.LOADING);
-    setLoadingMsg(`AI 正在定制题目，由于访问量较大可能需要排队，请稍等...`);
+    setLoadingMsg(`AI 正在定制专属题目，请稍候...`);
     
     try {
-      const newQuestions = await generateGrammarQuestions(count, points, difficulty);
+      // 传入 setLoadingMsg 作为重试过程中的进度更新回调
+      const newQuestions = await generateGrammarQuestions(count, points, difficulty, (msg) => {
+        setLoadingMsg(msg);
+      });
+      
       if (!newQuestions || newQuestions.length === 0) throw new Error("EMPTY_DATA");
       setQuestions(newQuestions);
       setView(AppState.QUIZ);
     } catch (error: any) {
       console.error("Quiz Generation Error:", error);
       const errStr = JSON.stringify(error).toLowerCase();
+      
       if (errStr.includes('429') || errStr.includes('quota')) {
-        alert("AI 暂时忙碌（频率限制），请等待 30-60 秒后重试。");
+        alert("今日免费配额已达上限或请求过于频繁。\n建议：\n1. 稍等 1-2 分钟后再试\n2. 减少一次生成的题目数量");
+      } else if (errStr.includes('format_error')) {
+        alert("AI 生成格式异常，请再试一次。");
       } else {
-        alert("出题遇到小状况，请检查网络后重试。");
+        alert("出题遇到状况，请检查网络连接。");
       }
       setView(AppState.HOME);
     } finally {
@@ -150,7 +157,7 @@ const App: React.FC = () => {
           questions={questions} 
           onFinish={finishQuiz} 
           onCancel={() => setView(AppState.HOME)} 
-          onQuotaError={() => alert("AI 响应过快，请稍后提问。")}
+          onQuotaError={() => alert("当前 AI 忙碌，请稍后再试。")}
           onAnswerSubmitted={handleAnswerSubmitted}
           onToggleSave={toggleSaveQuestion}
           savedHistory={userStats.savedHistory}
@@ -177,11 +184,11 @@ const App: React.FC = () => {
           <div className="bg-white w-full max-w-sm rounded-[40px] p-8 shadow-2xl animate-fadeIn">
             <div className="text-center mb-6">
               <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl">⚠️</div>
-              <h3 className="text-xl font-black text-gray-900">确定要清空吗？</h3>
-              <p className="text-xs text-gray-400 mt-2 font-medium">此操作不可逆。</p>
+              <h3 className="text-xl font-black text-gray-900">确认清空？</h3>
+              <p className="text-xs text-gray-400 mt-2 font-medium">此操作不可撤销。</p>
             </div>
             <div className="flex flex-col gap-3">
-              <button onClick={executeClearHistory} className="w-full py-4.5 bg-gray-900 text-white rounded-2xl font-black active:scale-95 transition-all">全部清空</button>
+              <button onClick={executeClearHistory} className="w-full py-4.5 bg-gray-900 text-white rounded-2xl font-black active:scale-95 transition-all">确认</button>
               <button onClick={() => setClearConfirm({ isOpen: false, type: null })} className="w-full py-4.5 bg-gray-100 text-gray-500 rounded-2xl font-bold active:scale-95 transition-all">取消</button>
             </div>
           </div>
