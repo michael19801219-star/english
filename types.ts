@@ -6,9 +6,10 @@ export interface Question {
   answerIndex: number;
   explanation: string;
   grammarPoint: string;
+  difficulty: Difficulty;
 }
 
-export type Difficulty = '简单' | '中等' | '较难';
+export type Difficulty = '简单' | '中等' | '较难' | '随机';
 
 export enum AppState {
   HOME = 'HOME',

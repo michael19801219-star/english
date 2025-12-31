@@ -5,7 +5,7 @@ import { UserStats, Difficulty, GRAMMAR_POINTS } from '../types';
 interface HomeViewProps {
   onStart: (count: number, difficulty: Difficulty, points: string[]) => void;
   stats: UserStats;
-  onGoToReview: () => void;
+  onGoToReview: (tab?: 'summary' | 'details') => void;
 }
 
 const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview }) => {
@@ -28,7 +28,6 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview }) => 
 
   return (
     <div className="flex-1 flex flex-col p-6 overflow-y-auto animate-fadeIn pb-10 relative">
-      {/* 顶部艺术化背景光晕 - 增强视觉深度 */}
       <div className="absolute top-[-80px] left-[-40px] w-72 h-72 bg-indigo-200 rounded-full blur-[90px] opacity-30 -z-10"></div>
       <div className="absolute top-[40px] right-[-60px] w-64 h-64 bg-violet-200 rounded-full blur-[90px] opacity-25 -z-10"></div>
       
@@ -38,8 +37,7 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview }) => 
             高考英语<br/>
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 via-indigo-500 to-violet-600">语法大师</span>
           </h1>
-          <div className="mt-4 inline-flex">
-            {/* 升级后的定制版标签：移除黑色，改用精致渐变 */}
+          <div className="mt-4 flex gap-2">
             <div className="flex items-center gap-2 px-4 py-1.5 bg-gradient-to-r from-indigo-500 to-violet-500 rounded-full shadow-lg shadow-indigo-200/60 border border-white/30">
               <span className="text-[12px] animate-pulse">✨</span>
               <span className="text-[11px] font-black text-white tracking-[0.08em] uppercase drop-shadow-sm">
@@ -49,22 +47,32 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview }) => 
           </div>
         </div>
         
-        <button 
-          onClick={onGoToReview}
-          className="bg-white/90 backdrop-blur-md p-4 rounded-[24px] shadow-sm border border-gray-100 flex flex-col items-center relative active:scale-90 transition-all hover:shadow-lg"
-        >
-          <span className="text-2xl">📒</span>
-          <span className="text-[9px] font-black text-gray-400 mt-1 uppercase tracking-widest">错题本</span>
-          {stats.wrongHistory.length > 0 && (
-            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] w-5 h-5 rounded-full flex items-center justify-center border-2 border-white font-black">
-              {stats.wrongHistory.length}
-            </span>
-          )}
-        </button>
+        <div className="flex gap-3">
+          <button 
+            onClick={() => onGoToReview('summary')}
+            className="bg-white/90 backdrop-blur-md p-4 rounded-[24px] shadow-sm border border-gray-100 flex flex-col items-center relative active:scale-90 transition-all hover:shadow-lg"
+            title="考点笔记"
+          >
+            <span className="text-2xl">📜</span>
+            <span className="text-[9px] font-black text-gray-400 mt-1 uppercase tracking-widest">知识笔记</span>
+          </button>
+
+          <button 
+            onClick={() => onGoToReview('details')}
+            className="bg-white/90 backdrop-blur-md p-4 rounded-[24px] shadow-sm border border-gray-100 flex flex-col items-center relative active:scale-90 transition-all hover:shadow-lg"
+          >
+            <span className="text-2xl">📕</span>
+            <span className="text-[9px] font-black text-gray-400 mt-1 uppercase tracking-widest">错题历史</span>
+            {stats.wrongHistory.length > 0 && (
+              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] w-5 h-5 rounded-full flex items-center justify-center border-2 border-white font-black">
+                {stats.wrongHistory.length}
+              </span>
+            )}
+          </button>
+        </div>
       </header>
 
       <div className="space-y-8 flex-1">
-        {/* 训练题量 */}
         <section className="bg-white/70 backdrop-blur-sm p-6 rounded-[36px] shadow-sm border border-white">
           <h3 className="text-[11px] font-black text-gray-400 mb-5 uppercase tracking-[0.2em] flex items-center gap-2">
             <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full shadow-sm shadow-indigo-200"></span> 训练题量
@@ -86,17 +94,16 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview }) => 
           </div>
         </section>
 
-        {/* 难度等级 */}
         <section className="bg-white/70 backdrop-blur-sm p-6 rounded-[36px] shadow-sm border border-white">
           <h3 className="text-[11px] font-black text-gray-400 mb-5 uppercase tracking-[0.2em] flex items-center gap-2">
             <span className="w-1.5 h-1.5 bg-violet-400 rounded-full shadow-sm shadow-violet-200"></span> 难度等级
           </h3>
-          <div className="flex bg-gray-100/50 p-1.5 rounded-[24px]">
-            {(['简单', '中等', '较难'] as Difficulty[]).map(d => (
+          <div className="flex bg-gray-100/50 p-1.5 rounded-[24px] gap-1 overflow-x-auto no-scrollbar">
+            {(['简单', '中等', '较难', '随机'] as Difficulty[]).map(d => (
               <button
                 key={d}
                 onClick={() => setDifficulty(d)}
-                className={`flex-1 py-3.5 rounded-[18px] text-sm font-black transition-all duration-400 ${
+                className={`flex-1 py-3.5 px-4 rounded-[18px] text-sm font-black transition-all duration-400 whitespace-nowrap ${
                   difficulty === d 
                     ? 'bg-white text-indigo-600 shadow-md ring-1 ring-black/5' 
                     : 'text-gray-400 opacity-60'
@@ -108,7 +115,6 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview }) => 
           </div>
         </section>
 
-        {/* 考点专项选择 */}
         <section className="bg-white/70 backdrop-blur-sm p-6 rounded-[36px] shadow-sm border border-white">
           <div className="flex justify-between items-center mb-5">
             <h3 className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] flex items-center gap-2">
@@ -139,7 +145,6 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview }) => 
           </div>
         </section>
 
-        {/* 智能分析 */}
         {hasWrongStats && topWrongPoint && (
           <section className="bg-gradient-to-br from-indigo-700 via-indigo-600 to-violet-700 p-8 rounded-[42px] shadow-2xl text-white relative overflow-hidden group">
             <div className="absolute top-[-20px] right-[-20px] w-40 h-40 bg-white/10 rounded-full blur-3xl"></div>
@@ -172,7 +177,6 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview }) => 
         </button>
       </footer>
 
-      {/* 考点选择 Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[100] flex flex-col bg-white animate-fadeIn">
           <header className="p-8 border-b border-gray-50 flex justify-between items-center">
