@@ -4,10 +4,6 @@ import { Question, Difficulty, ChatMessage, WrongQuestion } from "../types";
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-/**
- * 增强型重试函数
- * @param onRetry 每次重试时的回调，用于更新 UI 状态
- */
 async function withRetry<T>(
   fn: () => Promise<T>, 
   retries = 6, 
@@ -24,14 +20,9 @@ async function withRetry<T>(
       const isServerErr = errorStr.includes('500') || errorStr.includes('503') || errorStr.includes('504');
 
       if ((isQuota || isServerErr) && attempt < maxRetries) {
-        // 指数退避 + 随机抖动 (Jitter)
-        // 429 错误需要更长的等待时间来恢复配额
         const baseWait = isQuota ? 5000 : 2000;
         const waitTime = Math.min(baseWait * Math.pow(2, attempt) + Math.random() * 1000, 30000);
-        
         if (onRetry) onRetry(attempt + 1, Math.round(waitTime / 1000));
-        
-        console.warn(`[AI服务] 第 ${attempt + 1} 次重试中，等待 ${Math.round(waitTime)}ms...`);
         await delay(waitTime);
         return execute(attempt + 1);
       }
@@ -42,8 +33,6 @@ async function withRetry<T>(
   return execute(0);
 }
 
-// 切换为用户要求的 Gemini 2.5 Flash Lite 模型 (映射为 gemini-flash-lite-latest)
-// 该模型具有更高的配额限制，能有效解决 429 频率限制问题
 const TEXT_MODEL = 'gemini-flash-lite-latest';
 
 const SCHEMA = {
@@ -53,13 +42,14 @@ const SCHEMA = {
     properties: {
       id: { type: Type.STRING },
       question: { type: Type.STRING },
+      translation: { type: Type.STRING }, // 翻译字段
       options: { type: Type.ARRAY, items: { type: Type.STRING } },
       answerIndex: { type: Type.INTEGER },
       explanation: { type: Type.STRING },
       grammarPoint: { type: Type.STRING },
       difficulty: { type: Type.STRING }
     },
-    required: ["id", "question", "options", "answerIndex", "explanation", "grammarPoint", "difficulty"]
+    required: ["id", "question", "translation", "options", "answerIndex", "explanation", "grammarPoint", "difficulty"]
   }
 };
 
@@ -80,11 +70,11 @@ export const generateGrammarQuestions = async (
         systemInstruction: `你是一位高考英语名师。
         1. 题目语境真实，符合高考逻辑。
         2. 解析需包含结构分析和关键词提示。
-        3. 仅返回 JSON 数据，不带 Markdown 格式。`,
+        3. 必须为题目提供准确的【中文翻译】。
+        4. 仅返回 JSON 数据，不带 Markdown 格式。`,
         responseMimeType: "application/json",
         responseSchema: SCHEMA,
-        temperature: 0.4,
-        candidateCount: 1
+        temperature: 0.4
       }
     });
     

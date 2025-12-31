@@ -7,30 +7,48 @@ import QuizView from './components/QuizView';
 import ResultView from './components/ResultView';
 import LoadingView from './components/LoadingView';
 import ReviewView from './components/ReviewView';
+import StatsView from './components/StatsView';
 
 const App: React.FC = () => {
   const [view, setView] = useState<AppState>(AppState.HOME);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [results, setResults] = useState<QuizResults | null>(null);
   const [loadingMsg, setLoadingMsg] = useState('');
+  const [quizStartTime, setQuizStartTime] = useState<number>(0);
+  
   const [userStats, setUserStats] = useState<UserStats>(() => {
-    const saved = localStorage.getItem('gaokao_stats_v2');
+    const saved = localStorage.getItem('gaokao_stats_v5');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        return {
+          wrongCounts: parsed.wrongCounts || {},
+          wrongHistory: parsed.wrongHistory || [],
+          savedHistory: parsed.savedHistory || [],
+          totalQuestionsAttempted: parsed.totalQuestionsAttempted || 0,
+          totalCorrectAnswers: parsed.totalCorrectAnswers || 0,
+          totalStudyTime: parsed.totalStudyTime || 0,
+          dailyStats: parsed.dailyStats || {}
+        };
       } catch (e) {
-        return { wrongCounts: {}, wrongHistory: [], savedHistory: [] };
+        return { 
+          wrongCounts: {}, wrongHistory: [], savedHistory: [], 
+          totalQuestionsAttempted: 0, totalCorrectAnswers: 0, totalStudyTime: 0, dailyStats: {} 
+        };
       }
     }
-    return { wrongCounts: {}, wrongHistory: [], savedHistory: [] };
+    return { 
+      wrongCounts: {}, wrongHistory: [], savedHistory: [], 
+      totalQuestionsAttempted: 0, totalCorrectAnswers: 0, totalStudyTime: 0, dailyStats: {} 
+    };
   });
+
   const [reviewInitialTab, setReviewInitialTab] = useState<'summary' | 'details' | 'saved'>('summary');
   const [isProcessing, setIsProcessing] = useState(false);
-  
   const [clearConfirm, setClearConfirm] = useState<{ isOpen: boolean; type: 'details' | 'saved' | null }>({ isOpen: false, type: null });
 
   useEffect(() => {
-    localStorage.setItem('gaokao_stats_v2', JSON.stringify(userStats));
+    localStorage.setItem('gaokao_stats_v5', JSON.stringify(userStats));
   }, [userStats]);
 
   const handleUpdateStats = (newStats: UserStats) => {
@@ -40,6 +58,10 @@ const App: React.FC = () => {
   const handleGoToReview = (tab?: 'summary' | 'details' | 'saved') => {
     if (tab) setReviewInitialTab(tab);
     setView(AppState.REVIEW);
+  };
+
+  const handleGoToStats = () => {
+    setView(AppState.STATS);
   };
 
   const handleAnswerSubmitted = (question: Question, userAnswerIndex: number) => {
@@ -85,19 +107,6 @@ const App: React.FC = () => {
     setUserStats(prev => ({ ...prev, savedHistory: prev.savedHistory.filter(q => q.timestamp !== timestamp) }));
   };
 
-  const requestClearHistory = (type: 'details' | 'saved') => {
-    setClearConfirm({ isOpen: true, type });
-  };
-
-  const executeClearHistory = () => {
-    const type = clearConfirm.type;
-    setUserStats(prev => {
-      if (type === 'details') return { ...prev, wrongHistory: [], wrongCounts: {} };
-      else return { ...prev, savedHistory: [] };
-    });
-    setClearConfirm({ isOpen: false, type: null });
-  };
-
   const startQuiz = useCallback(async (count: number, difficulty: Difficulty, points: string[]) => {
     if (isProcessing) return;
     setIsProcessing(true);
@@ -105,25 +114,16 @@ const App: React.FC = () => {
     setLoadingMsg(`AI 正在定制专属题目，请稍候...`);
     
     try {
-      // 传入 setLoadingMsg 作为重试过程中的进度更新回调
       const newQuestions = await generateGrammarQuestions(count, points, difficulty, (msg) => {
         setLoadingMsg(msg);
       });
       
       if (!newQuestions || newQuestions.length === 0) throw new Error("EMPTY_DATA");
       setQuestions(newQuestions);
+      setQuizStartTime(Date.now());
       setView(AppState.QUIZ);
     } catch (error: any) {
-      console.error("Quiz Generation Error:", error);
-      const errStr = JSON.stringify(error).toLowerCase();
-      
-      if (errStr.includes('429') || errStr.includes('quota')) {
-        alert("今日免费配额已达上限或请求过于频繁。\n建议：\n1. 稍等 1-2 分钟后再试\n2. 减少一次生成的题目数量");
-      } else if (errStr.includes('format_error')) {
-        alert("AI 生成格式异常，请再试一次。");
-      } else {
-        alert("出题遇到状况，请检查网络连接。");
-      }
+      alert("出题遇到状况，请检查网络后再试。");
       setView(AppState.HOME);
     } finally {
       setIsProcessing(false);
@@ -131,13 +131,42 @@ const App: React.FC = () => {
   }, [isProcessing]);
 
   const finishQuiz = (userAnswers: number[]) => {
+    const now = new Date();
+    const dateKey = now.toISOString().split('T')[0];
+    const duration = Math.floor((Date.now() - quizStartTime) / 1000);
+
     let score = 0;
     const wrongPoints: string[] = [];
     userAnswers.forEach((ans, idx) => {
       if (ans === questions[idx].answerIndex) score++;
       else wrongPoints.push(questions[idx].grammarPoint);
     });
-    setResults({ score, total: questions.length, answers: userAnswers, questions, wrongGrammarPoints: Array.from(new Set(wrongPoints)) });
+
+    setUserStats(prev => {
+      const currentDaily = prev.dailyStats[dateKey] || { attempted: 0, correct: 0 };
+      return {
+        ...prev,
+        totalQuestionsAttempted: prev.totalQuestionsAttempted + questions.length,
+        totalCorrectAnswers: prev.totalCorrectAnswers + score,
+        totalStudyTime: prev.totalStudyTime + duration,
+        dailyStats: {
+          ...prev.dailyStats,
+          [dateKey]: {
+            attempted: currentDaily.attempted + questions.length,
+            correct: currentDaily.correct + score
+          }
+        }
+      };
+    });
+
+    setResults({ 
+      score, 
+      total: questions.length, 
+      answers: userAnswers, 
+      questions, 
+      wrongGrammarPoints: Array.from(new Set(wrongPoints)),
+      duration
+    });
     setView(AppState.RESULT);
   };
 
@@ -148,6 +177,7 @@ const App: React.FC = () => {
           onStart={startQuiz} 
           stats={userStats} 
           onGoToReview={handleGoToReview}
+          onGoToStats={handleGoToStats}
           onUpdateStats={handleUpdateStats}
         />
       )}
@@ -171,25 +201,30 @@ const App: React.FC = () => {
           history={userStats.wrongHistory} 
           savedHistory={userStats.savedHistory}
           onBack={() => setView(AppState.HOME)} 
-          onClear={requestClearHistory} 
+          onClear={(type) => setClearConfirm({ isOpen: true, type })} 
           onDeleteWrong={handleDeleteWrong}
           onDeleteSaved={handleDeleteSaved}
           onStartQuiz={(point) => startQuiz(10, '中等', [point])}
           initialTab={reviewInitialTab}
         />
       )}
+      {view === AppState.STATS && (
+        <StatsView stats={userStats} onBack={() => setView(AppState.HOME)} />
+      )}
 
       {clearConfirm.isOpen && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/40 backdrop-blur-sm p-6 animate-fadeIn">
-          <div className="bg-white w-full max-w-sm rounded-[40px] p-8 shadow-2xl animate-fadeIn">
-            <div className="text-center mb-6">
-              <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl">⚠️</div>
-              <h3 className="text-xl font-black text-gray-900">确认清空？</h3>
-              <p className="text-xs text-gray-400 mt-2 font-medium">此操作不可撤销。</p>
-            </div>
+          <div className="bg-white w-full max-w-sm rounded-[40px] p-8 shadow-2xl">
+            <h3 className="text-xl font-black text-center mb-6">确认清空？</h3>
             <div className="flex flex-col gap-3">
-              <button onClick={executeClearHistory} className="w-full py-4.5 bg-gray-900 text-white rounded-2xl font-black active:scale-95 transition-all">确认</button>
-              <button onClick={() => setClearConfirm({ isOpen: false, type: null })} className="w-full py-4.5 bg-gray-100 text-gray-500 rounded-2xl font-bold active:scale-95 transition-all">取消</button>
+              <button onClick={() => {
+                setUserStats(prev => {
+                  if (clearConfirm.type === 'details') return { ...prev, wrongHistory: [], wrongCounts: {} };
+                  return { ...prev, savedHistory: [] };
+                });
+                setClearConfirm({ isOpen: false, type: null });
+              }} className="w-full py-4.5 bg-gray-900 text-white rounded-2xl font-black">确认</button>
+              <button onClick={() => setClearConfirm({ isOpen: false, type: null })} className="w-full py-4.5 bg-gray-100 text-gray-500 rounded-2xl font-bold">取消</button>
             </div>
           </div>
         </div>

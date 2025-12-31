@@ -38,7 +38,6 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel, onQu
     }
   }, [chatHistory, isAsking]);
 
-  // 当反馈显示时，自动滚动到反馈部分
   useEffect(() => {
     if (showFeedback && feedbackRef.current) {
       setTimeout(() => {
@@ -78,7 +77,7 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel, onQu
       if (err.message === "QUOTA_EXCEEDED") {
         onQuotaError();
       } else {
-        alert(err.message);
+        alert("追问失败，请稍后再试");
       }
     } finally {
       setIsAsking(false);
@@ -114,7 +113,7 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel, onQu
           <div className="bg-white w-full max-w-sm rounded-[40px] p-10 shadow-2xl animate-fadeIn text-center">
             <div className="text-5xl mb-6">⚠️</div>
             <h3 className="text-2xl font-black text-gray-900 mb-3">要退出练习吗？</h3>
-            <p className="text-gray-500 text-sm mb-8 font-medium italic">未完成的题目将不会被记录，但已答错的题目已自动存入错题本。</p>
+            <p className="text-gray-500 text-sm mb-8 font-medium italic">未完成的题目将不会被记录。</p>
             <div className="flex flex-col gap-3">
               <button onClick={onCancel} className="w-full py-4.5 bg-red-500 text-white rounded-2xl font-black shadow-lg shadow-red-100">确定退出</button>
               <button onClick={() => setIsExiting(false)} className="w-full py-4.5 bg-gray-100 text-gray-600 rounded-2xl font-bold">继续练习</button>
@@ -188,7 +187,17 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel, onQu
                   <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Analysis & Insight</p>
                 </div>
               </div>
-              <div className="text-[13px] text-gray-600 leading-[1.7] bg-gray-50/80 p-5 rounded-[24px] font-medium border border-gray-50 italic">
+
+              {/* 中文翻译区域 */}
+              {questions[currentIndex].translation && (
+                <div className="mb-4 p-4 bg-amber-50/50 border border-amber-100 rounded-2xl">
+                  <span className="text-[10px] font-black text-amber-600 uppercase mb-1 block">中文翻译</span>
+                  <p className="text-[13px] text-amber-900 font-bold italic">{questions[currentIndex].translation}</p>
+                </div>
+              )}
+
+              <div className="text-[13px] text-gray-600 leading-[1.7] bg-gray-50/80 p-5 rounded-[24px] font-medium border border-gray-50">
+                <span className="text-[10px] font-black text-indigo-500 uppercase mb-1 block">考点深度解析</span>
                 {questions[currentIndex].explanation}
               </div>
             </div>
@@ -207,7 +216,7 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel, onQu
               <div className="flex flex-col gap-3.5 mb-6 max-h-[300px] overflow-y-auto no-scrollbar">
                 {chatHistory.length === 0 && (
                   <div className="text-center py-4">
-                    <p className="text-[11px] text-indigo-300 font-bold italic">对这道题还有不理解的地方？在下方问问我吧！</p>
+                    <p className="text-[11px] text-indigo-300 font-bold italic">这道题还有不理解的地方？在下方问问我吧！</p>
                   </div>
                 )}
                 {chatHistory.map((msg, idx) => (
@@ -240,10 +249,7 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel, onQu
                     className={`w-full py-4 pl-5 pr-12 bg-white rounded-[20px] border-none text-[14px] font-bold shadow-lg transition-all focus:ring-4 focus:ring-indigo-500/10 placeholder:text-gray-300 ${isRecognizing ? 'ring-2 ring-indigo-500 bg-indigo-50' : ''}`}
                   />
                   <button 
-                    onClick={() => {
-                      if (isRecognizing) recognitionRef.current?.stop();
-                      else recognitionRef.current?.start();
-                    }} 
+                    onClick={() => isRecognizing ? recognitionRef.current?.stop() : recognitionRef.current?.start()} 
                     className={`absolute right-2.5 top-1/2 -translate-y-1/2 w-9 h-9 rounded-xl flex items-center justify-center transition-all ${isRecognizing ? 'bg-indigo-600 text-white animate-pulse' : 'text-gray-300 hover:text-indigo-400'}`}
                   >
                     🎙️
@@ -252,7 +258,7 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel, onQu
                 <button 
                   onClick={handleAskTutor} 
                   disabled={!followUpQuery.trim() || isAsking} 
-                  className={`w-12 h-12 rounded-[18px] shadow-xl transition-all flex items-center justify-center ${!followUpQuery.trim() || isAsking ? 'bg-gray-100 text-gray-300' : 'bg-indigo-600 text-white active:scale-90 hover:bg-indigo-700'}`}
+                  className={`w-12 h-12 rounded-[18px] shadow-xl transition-all flex items-center justify-center ${!followUpQuery.trim() || isAsking ? 'bg-gray-100 text-gray-300' : 'bg-indigo-600 text-white active:scale-90'}`}
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 12h14M12 5l7 7-7 7" /></svg>
                 </button>
@@ -267,22 +273,17 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel, onQu
           <button 
             disabled={selectedOption === null} 
             onClick={handleSubmit} 
-            className={`w-full py-4.5 rounded-[24px] font-black text-[18px] shadow-2xl transition-all ${selectedOption === null ? 'bg-gray-200 text-gray-400' : 'bg-indigo-600 text-white active:scale-[0.98] shadow-indigo-200 hover:bg-indigo-700'}`}
+            className={`w-full py-4.5 rounded-[24px] font-black text-[18px] shadow-2xl transition-all ${selectedOption === null ? 'bg-gray-200 text-gray-400' : 'bg-indigo-600 text-white shadow-indigo-200'}`}
           >
             确认提交
           </button>
         ) : (
-          <button onClick={handleNext} className="w-full bg-gray-900 text-white py-4.5 rounded-[24px] font-black text-[18px] shadow-2xl flex items-center justify-center gap-2 active:scale-[0.98] transition-all hover:bg-black">
+          <button onClick={handleNext} className="w-full bg-gray-900 text-white py-4.5 rounded-[24px] font-black text-[18px] shadow-2xl flex items-center justify-center gap-2 active:scale-[0.98]">
             <span>{currentIndex === questions.length - 1 ? '查看测试报告' : '下一题'}</span>
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
           </button>
         )}
       </footer>
-
-      <style>{`
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-      `}</style>
     </div>
   );
 };

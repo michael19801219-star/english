@@ -20,13 +20,33 @@ interface DeepDiveData {
   tips: string[];
 }
 
-const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, onClear, onDeleteWrong, onDeleteSaved, onStartQuiz, initialTab = 'summary' }) => {
+const ReviewView: React.FC<ReviewViewProps> = ({ 
+  history, 
+  savedHistory, 
+  onBack, 
+  onClear, 
+  onDeleteWrong, 
+  onDeleteSaved, 
+  onStartQuiz, 
+  initialTab = 'summary' 
+}) => {
   const [activeTab, setActiveTab] = useState<'summary' | 'details' | 'saved'>(initialTab);
   const [selectedPoint, setSelectedPoint] = useState<string | null>(null);
   const [deepDives, setDeepDives] = useState<Record<string, DeepDiveData>>({});
   const [loadingPoints, setLoadingPoints] = useState<Record<string, boolean>>({});
   
-  // AI 提问相关状态
+  // 单题删除确认状态
+  const [singleDeleteConfirm, setSingleDeleteConfirm] = useState<{ 
+    isOpen: boolean; 
+    item: WrongQuestion | null; 
+    type: 'details' | 'saved' | null 
+  }>({
+    isOpen: false,
+    item: null,
+    type: null
+  });
+
+  // AI 提问相关
   const [activeChatId, setActiveChatId] = useState<number | null>(null);
   const [followUpQuery, setFollowUpQuery] = useState('');
   const [isAsking, setIsAsking] = useState(false);
@@ -67,7 +87,7 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
     return activeTab === 'details' ? history : (activeTab === 'saved' ? savedHistory : []);
   }, [activeTab, history, savedHistory]);
 
-  const knowledgeMap = useMemo<Record<string, { count: number; questions: WrongQuestion[] }>>(() => {
+  const knowledgeMap = useMemo(() => {
     const acc: Record<string, { count: number; questions: WrongQuestion[] }> = {};
     history.forEach(q => {
       const point = q.grammarPoint || '通用语法';
@@ -79,11 +99,10 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
   }, [history]);
 
   const sortedPoints = useMemo(() => {
-    const entries = Object.entries(knowledgeMap) as [string, { count: number; questions: WrongQuestion[] }][];
-    return entries.sort((a, b) => b[1].count - a[1].count);
+    return Object.entries(knowledgeMap).sort((a, b) => b[1].count - a[1].count);
   }, [knowledgeMap]);
 
-  const groupedDetailedData = useMemo<Record<string, WrongQuestion[]>>(() => {
+  const groupedDetailedData = useMemo(() => {
     const acc: Record<string, WrongQuestion[]> = {};
     currentItems.forEach(q => {
       const point = q.grammarPoint || '通用语法';
@@ -136,10 +155,31 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
         [qId]: [...(prev[qId] || []), { role: 'model', content: response }]
       }));
     } catch (err) {
-      alert("AI 暂时离线，请检查网络后再问。");
+      alert("AI 暂时离线，请重试。");
     } finally {
       setIsAsking(false);
     }
+  };
+
+  const openDeleteModal = (e: React.MouseEvent, q: WrongQuestion) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSingleDeleteConfirm({
+      isOpen: true,
+      item: q,
+      type: activeTab === 'details' ? 'details' : 'saved'
+    });
+  };
+
+  const confirmDelete = () => {
+    if (singleDeleteConfirm.item) {
+      if (singleDeleteConfirm.type === 'details') {
+        onDeleteWrong(singleDeleteConfirm.item.timestamp);
+      } else {
+        onDeleteSaved(singleDeleteConfirm.item.timestamp);
+      }
+    }
+    setSingleDeleteConfirm({ isOpen: false, item: null, type: null });
   };
 
   return (
@@ -153,7 +193,7 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
             <h1 className="text-xl font-black text-gray-900 tracking-tight">语法笔记本</h1>
           </div>
           {(activeTab === 'details' && history.length > 0) || (activeTab === 'saved' && savedHistory.length > 0) ? (
-            <button onClick={() => onClear(activeTab === 'details' ? 'details' : 'saved')} className="px-4 py-2 text-[11px] font-black text-red-500 bg-red-50 rounded-xl active:scale-95">清空全部</button>
+            <button onClick={() => onClear(activeTab === 'details' ? 'details' : 'saved')} className="px-4 py-2 text-[11px] font-black text-red-500 bg-red-50 rounded-xl active:scale-95">清空本页</button>
           ) : null}
         </header>
 
@@ -180,7 +220,7 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
           ) : (
             <div className="space-y-4">
               {sortedPoints.map(([point, data]) => {
-                const diveData: DeepDiveData | undefined = deepDives[point];
+                const diveData = deepDives[point];
                 const isLoading = loadingPoints[point];
                 return (
                   <div key={point} className="bg-white rounded-[24px] border border-gray-100 overflow-hidden shadow-sm transition-all duration-300">
@@ -201,9 +241,7 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
                         ) : diveData ? (
                           <>
                             <div className="p-5 bg-indigo-50/50 rounded-2xl border border-indigo-100/30">
-                              <div className="flex items-center gap-2 mb-2">
-                                <span className="text-[10px] font-black text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded uppercase">Master Lecture</span>
-                              </div>
+                              <span className="text-[10px] font-black text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded uppercase block w-max mb-2">Master Lecture</span>
                               <p className="text-[13px] text-indigo-900 leading-relaxed font-medium">{diveData.lecture}</p>
                             </div>
                             <div className="p-5 bg-red-50/50 rounded-2xl border border-red-100/30">
@@ -213,23 +251,19 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
                             <div className="p-5 bg-green-50/50 rounded-2xl border border-green-100/30">
                               <h6 className="text-[10px] font-black text-green-700 uppercase mb-2">提分技巧</h6>
                               <ul className="space-y-2">
-                                {/* FIXED: Explicitly cast diveData.tips to string[] to resolve the 'unknown' error */}
-                                {Array.isArray(diveData.tips) && (diveData.tips as string[]).map((tip: string, i: number) => (
+                                {diveData.tips.map((tip, i) => (
                                   <li key={i} className="text-[13px] text-green-900 leading-relaxed font-bold flex gap-2">
                                     <span className="text-green-400">#</span> {tip}
                                   </li>
                                 ))}
                               </ul>
                             </div>
-                            <button onClick={() => onStartQuiz(point)} className="w-full py-4.5 bg-indigo-600 text-white rounded-[20px] font-black text-sm active:scale-95 shadow-lg shadow-indigo-100 transition-all">
+                            <button onClick={() => onStartQuiz(point)} className="w-full py-4.5 bg-indigo-600 text-white rounded-[20px] font-black text-sm active:scale-95 shadow-lg transition-all">
                               针对此考点强化训练
                             </button>
                           </>
                         ) : (
-                          <div className="text-center py-8 text-gray-300">
-                             <p className="text-xs mb-3">讲义加载失败，请检查网络或刷新</p>
-                             <button onClick={() => handleTogglePoint(point)} className="px-4 py-2 bg-gray-100 text-gray-500 rounded-lg text-[10px] font-bold">重试加载</button>
-                          </div>
+                          <div className="text-center py-8 text-gray-300">讲义加载失败</div>
                         )}
                       </div>
                     )}
@@ -242,7 +276,7 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
           Object.keys(groupedDetailedData).length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 text-gray-300">
               <span className="text-6xl mb-4 opacity-50">🍃</span>
-              <p className="font-bold">此考点下暂无题目</p>
+              <p className="font-bold">此列表暂无题目</p>
             </div>
           ) : (
             <div className="space-y-8">
@@ -254,24 +288,27 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
                   </div>
                   {items.map((q) => {
                     const isChatting = activeChatId === q.timestamp;
-                    // FIXED: Explicitly type qChatHistory to prevent it being inferred as unknown
-                    const qChatHistory: ChatMessage[] = chatHistories[q.timestamp] || [];
+                    const qChatHistory = chatHistories[q.timestamp] || [];
                     
                     return (
                       <div key={q.timestamp} className="bg-white rounded-[32px] border border-gray-100 shadow-sm relative overflow-hidden group">
-                        {/* 题目内容 */}
                         <div className="p-6">
                           <button 
-                            onClick={(e) => {
-                              e.preventDefault();
-                              onDeleteWrong(q.timestamp);
-                            }}
-                            className="absolute top-4 right-4 w-9 h-9 flex items-center justify-center rounded-full bg-red-50 text-red-400 opacity-0 group-hover:opacity-100 transition-all z-20 active:scale-90"
+                            onClick={(e) => openDeleteModal(e, q)}
+                            className="absolute top-4 right-4 w-9 h-9 flex items-center justify-center rounded-full bg-red-50 text-red-400 active:scale-90 transition-all z-20"
                           >
                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                           </button>
                           
-                          <p className="text-[15px] font-bold text-gray-800 mb-5 pr-8 leading-relaxed">{q.question}</p>
+                          <p className="text-[15px] font-bold text-gray-800 mb-2 pr-8 leading-relaxed">{q.question}</p>
+                          
+                          {/* 题目中文翻译 */}
+                          {q.translation && (
+                            <div className="mb-4 p-3 bg-amber-50 rounded-xl border border-amber-100/50">
+                              <p className="text-[12px] text-amber-900 font-bold italic">【翻译】{q.translation}</p>
+                            </div>
+                          )}
+
                           <div className="space-y-2 mb-6">
                             {q.options.map((opt, i) => (
                               <div key={i} className={`p-4 rounded-2xl text-[13px] border-2 transition-all ${i === q.answerIndex ? 'bg-green-50 border-green-200 text-green-700 font-black' : i === q.userAnswerIndex ? 'bg-red-50 border-red-200 text-red-700' : 'bg-gray-50 border-transparent text-gray-400'}`}>
@@ -279,6 +316,7 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
                               </div>
                             ))}
                           </div>
+                          
                           <div className="p-5 bg-indigo-50/30 rounded-2xl text-[12px] text-gray-600 leading-relaxed border border-indigo-100/20 mb-4">
                             <span className="font-black text-indigo-600 block mb-2 tracking-widest uppercase text-[10px]">考点深度解析</span>
                             {q.explanation}
@@ -286,26 +324,23 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
 
                           <button 
                             onClick={() => setActiveChatId(isChatting ? null : q.timestamp)}
-                            className={`w-full py-4 rounded-2xl font-black text-xs flex items-center justify-center gap-2 transition-all ${isChatting ? 'bg-gray-900 text-white' : 'bg-indigo-50 text-indigo-600 border border-indigo-100 shadow-sm'}`}
+                            className={`w-full py-4 rounded-2xl font-black text-xs flex items-center justify-center gap-2 transition-all ${isChatting ? 'bg-gray-900 text-white shadow-xl' : 'bg-indigo-50 text-indigo-600 border border-indigo-100'}`}
                           >
                             <span>{isChatting ? '收起 AI 答疑' : '🤖 针对此题向 AI 提问'}</span>
-                            {!isChatting && <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-pulse"></div>}
                           </button>
                         </div>
 
-                        {/* AI 答疑区 */}
                         {isChatting && (
                           <div className="bg-indigo-50/50 p-6 border-t border-indigo-100/30 animate-fadeIn">
                             <div className="flex flex-col gap-4 mb-6 max-h-[350px] overflow-y-auto no-scrollbar">
                               {qChatHistory.length === 0 && (
                                 <p className="text-center text-[11px] text-indigo-300 font-bold italic py-4">
-                                  这题哪里不明白？或者想知道相关的变式题？直接问我！
+                                  这题哪里不明白？或者想知道相关的变式题？
                                 </p>
                               )}
-                              {/* FIXED: Using typed qChatHistory to avoid mapping on 'unknown' */}
                               {qChatHistory.map((msg, idx) => (
                                 <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                  <div className={`max-w-[85%] p-4 rounded-[22px] text-[13px] font-medium leading-relaxed ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-br-none' : 'bg-white text-gray-700 rounded-bl-none shadow-sm border border-indigo-50'}`}>
+                                  <div className={`max-w-[85%] p-4 rounded-[22px] text-[13px] font-medium leading-relaxed ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-br-none' : 'bg-white text-gray-700 rounded-bl-none border border-indigo-50'}`}>
                                     {msg.content}
                                   </div>
                                 </div>
@@ -323,26 +358,18 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
                             </div>
 
                             <div className="relative flex gap-2">
-                              <div className="relative flex-1">
-                                <input
-                                  type="text"
-                                  value={followUpQuery}
-                                  onChange={(e) => setFollowUpQuery(e.target.value)}
-                                  onKeyPress={(e) => e.key === 'Enter' && handleAskAI(q)}
-                                  placeholder={isRecognizing ? "正在倾听..." : "输入你的语法疑问..."}
-                                  className={`w-full py-4 pl-5 pr-12 bg-white rounded-2xl border-none text-[13px] font-bold shadow-lg transition-all ${isRecognizing ? 'ring-2 ring-indigo-500 bg-indigo-50' : ''}`}
-                                />
-                                <button 
-                                  onClick={() => isRecognizing ? recognitionRef.current?.stop() : recognitionRef.current?.start()}
-                                  className={`absolute right-2.5 top-1/2 -translate-y-1/2 w-9 h-9 rounded-xl flex items-center justify-center ${isRecognizing ? 'bg-indigo-600 text-white animate-pulse' : 'text-gray-300 hover:text-indigo-400'}`}
-                                >
-                                  🎙️
-                                </button>
-                              </div>
+                              <input
+                                type="text"
+                                value={followUpQuery}
+                                onChange={(e) => setFollowUpQuery(e.target.value)}
+                                onKeyPress={(e) => e.key === 'Enter' && handleAskAI(q)}
+                                placeholder={isRecognizing ? "正在听..." : "输入语法疑问..."}
+                                className={`flex-1 py-4 px-5 bg-white rounded-2xl border-none text-[13px] font-bold shadow-lg transition-all ${isRecognizing ? 'ring-2 ring-indigo-500' : ''}`}
+                              />
                               <button 
                                 onClick={() => handleAskAI(q)} 
                                 disabled={!followUpQuery.trim() || isAsking}
-                                className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${!followUpQuery.trim() || isAsking ? 'bg-gray-100 text-gray-300' : 'bg-indigo-600 text-white shadow-xl shadow-indigo-100 active:scale-90'}`}
+                                className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${!followUpQuery.trim() || isAsking ? 'bg-gray-100 text-gray-300' : 'bg-indigo-600 text-white active:scale-90'}`}
                               >
                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 12h14M12 5l7 7-7 7"/></svg>
                               </button>
@@ -358,6 +385,23 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
           )
         )}
       </div>
+
+      {/* 单题删除确认框 */}
+      {singleDeleteConfirm.isOpen && (
+        <div className="fixed inset-0 z-[400] flex items-center justify-center bg-black/40 backdrop-blur-sm p-6 animate-fadeIn">
+          <div className="bg-white w-full max-w-sm rounded-[40px] p-8 shadow-2xl">
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl">🗑️</div>
+              <h3 className="text-xl font-black text-gray-900">移除此题？</h3>
+              <p className="text-xs text-gray-400 mt-2 font-medium">题目将从{singleDeleteConfirm.type === 'details' ? '错题集' : '收藏本'}中删除。</p>
+            </div>
+            <div className="flex flex-col gap-3">
+              <button onClick={confirmDelete} className="w-full py-4.5 bg-red-600 text-white rounded-2xl font-black active:scale-95 transition-all">确认删除</button>
+              <button onClick={() => setSingleDeleteConfirm({ isOpen: false, item: null, type: null })} className="w-full py-4.5 bg-gray-100 text-gray-500 rounded-2xl font-bold active:scale-95 transition-all">取消</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style>{`
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }

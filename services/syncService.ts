@@ -16,14 +16,19 @@ const compressData = (stats: UserStats): string => {
     q.explanation.slice(0, 200),
     q.grammarPoint,
     q.userAnswerIndex,
-    q.timestamp
+    q.timestamp,
+    q.translation
   ];
   
   const payload = {
     c: stats.wrongCounts,
-    w: stats.wrongHistory.slice(0, 50).map(simplify), // 增加到50条，满足大部分需求
+    w: stats.wrongHistory.slice(0, 50).map(simplify),
     s: stats.savedHistory.slice(0, 30).map(simplify),
-    v: "4.0_MANUAL",
+    tqa: stats.totalQuestionsAttempted,
+    tca: stats.totalCorrectAnswers,
+    tst: stats.totalStudyTime,
+    ds: stats.dailyStats,
+    v: "5.0_MANUAL",
     t: Date.now()
   };
   
@@ -58,13 +63,18 @@ const decompressData = (base64: string): UserStats | null => {
       grammarPoint: q[4], 
       difficulty: '中等', 
       userAnswerIndex: q[5], 
-      timestamp: q[6]
+      timestamp: q[6],
+      translation: q[7]
     });
 
     return {
       wrongCounts: data.c || {},
       wrongHistory: (data.w || []).map(restore),
       savedHistory: (data.s || []).map(restore),
+      totalQuestionsAttempted: data.tqa || 0,
+      totalCorrectAnswers: data.tca || 0,
+      totalStudyTime: data.tst || 0,
+      dailyStats: data.ds || {},
       lastSyncTime: data.t
     };
   } catch (e) {
