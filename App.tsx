@@ -20,24 +20,33 @@ const App: React.FC = () => {
   });
   const [reviewInitialTab, setReviewInitialTab] = useState<'summary' | 'details' | 'saved'>('summary');
 
+  // 初始化加载
   useEffect(() => {
     const saved = localStorage.getItem('gaokao_stats_v2');
     if (saved) {
-      const parsed = JSON.parse(saved);
-      setUserStats({
-        ...parsed,
-        savedHistory: parsed.savedHistory || []
-      });
+      try {
+        const parsed = JSON.parse(saved);
+        setUserStats({
+          wrongCounts: parsed.wrongCounts || {},
+          wrongHistory: parsed.wrongHistory || [],
+          savedHistory: parsed.savedHistory || [],
+          syncId: parsed.syncId,
+          lastSyncTime: parsed.lastSyncTime
+        });
+      } catch (e) {
+        console.error("Failed to parse local storage", e);
+      }
     }
   }, []);
 
-  const saveStatsToStorage = (updatedStats: UserStats) => {
-    setUserStats(updatedStats);
-    localStorage.setItem('gaokao_stats_v2', JSON.stringify(updatedStats));
+  // 状态同步到本地存储
+  const syncToStorage = (stats: UserStats) => {
+    localStorage.setItem('gaokao_stats_v2', JSON.stringify(stats));
   };
 
   const handleUpdateStats = (newStats: UserStats) => {
-    saveStatsToStorage(newStats);
+    setUserStats(newStats);
+    syncToStorage(newStats);
   };
 
   const handleGoToReview = (tab?: 'summary' | 'details' | 'saved') => {
@@ -47,64 +56,88 @@ const App: React.FC = () => {
 
   const handleAnswerSubmitted = (question: Question, userAnswerIndex: number) => {
     if (userAnswerIndex !== question.answerIndex) {
-      const point = question.grammarPoint;
-      const updatedCounts = { ...userStats.wrongCounts, [point]: (userStats.wrongCounts[point] || 0) + 1 };
-      
-      const wrongEntry: WrongQuestion = {
-        ...question,
-        userAnswerIndex,
-        timestamp: Date.now()
-      };
-      
-      const updatedHistory = [wrongEntry, ...userStats.wrongHistory.filter(q => q.question !== question.question)].slice(0, 200);
-      
-      saveStatsToStorage({
-        ...userStats,
-        wrongCounts: updatedCounts,
-        wrongHistory: updatedHistory
+      setUserStats(prev => {
+        const point = question.grammarPoint;
+        const newCounts = { ...prev.wrongCounts, [point]: (prev.wrongCounts[point] || 0) + 1 };
+        const wrongEntry: WrongQuestion = {
+          ...question,
+          userAnswerIndex,
+          timestamp: Date.now()
+        };
+        const newHistory = [wrongEntry, ...prev.wrongHistory.filter(q => q.question !== question.question)].slice(0, 200);
+        const newState = { ...prev, wrongCounts: newCounts, wrongHistory: newHistory };
+        syncToStorage(newState);
+        return newState;
       });
     }
   };
 
   const toggleSaveQuestion = (question: Question, userAnswerIndex: number) => {
-    const isSaved = userStats.savedHistory.some(q => q.question === question.question);
-    let updatedSaved;
-    if (isSaved) {
-      updatedSaved = userStats.savedHistory.filter(q => q.question !== question.question);
-    } else {
-      updatedSaved = [{ ...question, userAnswerIndex, timestamp: Date.now() }, ...userStats.savedHistory].slice(0, 100);
-    }
-    saveStatsToStorage({
-      ...userStats,
-      savedHistory: updatedSaved
+    setUserStats(prev => {
+      const isAlreadySaved = prev.savedHistory.some(q => q.question === question.question);
+      let newSaved;
+      if (isAlreadySaved) {
+        newSaved = prev.savedHistory.filter(q => q.question !== question.question);
+      } else {
+        newSaved = [{ ...question, userAnswerIndex, timestamp: Date.now() }, ...prev.savedHistory].slice(0, 100);
+      }
+      const newState = { ...prev, savedHistory: newSaved };
+      syncToStorage(newState);
+      return newState;
     });
   };
 
-  const handleDeleteWrong = (timestamp: number) => {
-    const deletedItem = userStats.wrongHistory.find(q => q.timestamp === timestamp);
-    if (!deletedItem) return;
+  const handleDeleteWrong = (timestamp: number, questionText: string) => {
+    setUserStats(prev => {
+      // 兼容逻辑：优先按时间戳匹配，如果时间戳不存在则按文本匹配
+      const itemToDelete = prev.wrongHistory.find(q => 
+        (timestamp && q.timestamp === timestamp) || q.question === questionText
+      );
 
-    const point = deletedItem.grammarPoint;
-    const updatedCounts = { ...userStats.wrongCounts };
-    if (updatedCounts[point] > 0) {
-      updatedCounts[point]--;
-      if (updatedCounts[point] === 0) delete updatedCounts[point];
-    }
+      if (!itemToDelete) return prev;
 
-    const updatedHistory = userStats.wrongHistory.filter(q => q.timestamp !== timestamp);
-    
-    saveStatsToStorage({
-      ...userStats,
-      wrongHistory: updatedHistory,
-      wrongCounts: updatedCounts
+      const point = itemToDelete.grammarPoint;
+      const newCounts = { ...prev.wrongCounts };
+      if (newCounts[point] > 0) {
+        newCounts[point]--;
+        if (newCounts[point] === 0) delete newCounts[point];
+      }
+
+      const newHistory = prev.wrongHistory.filter(q => 
+        (timestamp && q.timestamp !== timestamp) || (!timestamp && q.question !== questionText)
+      );
+
+      const newState = { ...prev, wrongHistory: newHistory, wrongCounts: newCounts };
+      syncToStorage(newState);
+      return newState;
     });
   };
 
-  const handleDeleteSaved = (timestamp: number) => {
-    saveStatsToStorage({
-      ...userStats,
-      savedHistory: userStats.savedHistory.filter(q => q.timestamp !== timestamp)
+  const handleDeleteSaved = (timestamp: number, questionText: string) => {
+    setUserStats(prev => {
+      const newSaved = prev.savedHistory.filter(q => 
+        (timestamp && q.timestamp !== timestamp) || (!timestamp && q.question !== questionText)
+      );
+      const newState = { ...prev, savedHistory: newSaved };
+      syncToStorage(newState);
+      return newState;
     });
+  };
+
+  const clearHistory = (type: 'details' | 'saved') => {
+    const label = type === 'details' ? '错题集' : '收藏夹';
+    if (confirm(`确定要清空全部${label}吗？此操作无法撤销。`)) {
+      setUserStats(prev => {
+        let newState;
+        if (type === 'details') {
+          newState = { ...prev, wrongHistory: [], wrongCounts: {} };
+        } else {
+          newState = { ...prev, savedHistory: [] };
+        }
+        syncToStorage(newState);
+        return newState;
+      });
+    }
   };
 
   const startQuiz = async (count: number, difficulty: Difficulty, points: string[]) => {
@@ -116,7 +149,7 @@ const App: React.FC = () => {
       setView(AppState.QUIZ);
     } catch (error: any) {
       console.error("Quiz Generation Error:", error);
-      alert("生成失败，请检查网络或 API 配置后重试。");
+      alert("生成失败，请稍后重试。");
       setView(AppState.HOME);
     }
   };
@@ -141,30 +174,6 @@ const App: React.FC = () => {
     setView(AppState.RESULT);
   };
 
-  const handleConsolidate = () => {
-    if (results && results.wrongGrammarPoints.length > 0) {
-      startQuiz(10, '中等', results.wrongGrammarPoints);
-    }
-  };
-
-  const clearHistory = (type: 'details' | 'saved') => {
-    const label = type === 'details' ? '错题集' : '收藏夹';
-    if (confirm(`确定要清空全部${label}吗？此操作不可撤销。`)) {
-      if (type === 'details') {
-        saveStatsToStorage({
-          ...userStats,
-          wrongHistory: [],
-          wrongCounts: {}
-        });
-      } else {
-        saveStatsToStorage({
-          ...userStats,
-          savedHistory: []
-        });
-      }
-    }
-  };
-
   return (
     <div className="h-[100dvh] bg-gray-50 flex flex-col max-w-md mx-auto relative overflow-hidden shadow-2xl">
       {view === AppState.HOME && (
@@ -181,14 +190,14 @@ const App: React.FC = () => {
           questions={questions} 
           onFinish={finishQuiz} 
           onCancel={() => setView(AppState.HOME)} 
-          onQuotaError={() => alert("当前请求过快，请稍后再试。")}
+          onQuotaError={() => alert("请求频繁，请稍后再试。")}
           onAnswerSubmitted={handleAnswerSubmitted}
           onToggleSave={toggleSaveQuestion}
           savedHistory={userStats.savedHistory}
         />
       )}
       {view === AppState.RESULT && results && (
-        <ResultView results={results} onRestart={() => setView(AppState.HOME)} onConsolidate={handleConsolidate} />
+        <ResultView results={results} onRestart={() => setView(AppState.HOME)} onConsolidate={() => startQuiz(10, '中等', results.wrongGrammarPoints)} />
       )}
       {view === AppState.REVIEW && (
         <ReviewView 

@@ -8,8 +8,8 @@ interface ReviewViewProps {
   savedHistory: WrongQuestion[];
   onBack: () => void;
   onClear: (type: 'details' | 'saved') => void;
-  onDeleteWrong: (timestamp: number) => void;
-  onDeleteSaved: (timestamp: number) => void;
+  onDeleteWrong: (timestamp: number, text: string) => void;
+  onDeleteSaved: (timestamp: number, text: string) => void;
   onStartQuiz: (point: string) => void;
   initialTab?: 'summary' | 'details' | 'saved';
 }
@@ -26,16 +26,12 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
   const [deepDives, setDeepDives] = useState<Record<string, DeepDiveData>>({});
   const [loadingPoints, setLoadingPoints] = useState<Record<string, boolean>>({});
   const [errorPoints, setErrorPoints] = useState<Record<string, boolean>>({});
-  const [isGlobalLoading, setIsGlobalLoading] = useState(false);
-
+  
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
-
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [followUpQuery, setFollowUpQuery] = useState('');
   const [isAsking, setIsAsking] = useState(false);
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
-  const [isRecognizing, setIsRecognizing] = useState(false);
-  const recognitionRef = useRef<any>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -48,40 +44,6 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
     }
   }, [chatHistory, isAsking]);
 
-  useEffect(() => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (SpeechRecognition) {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.lang = 'zh-CN';
-      recognition.interimResults = true;
-      recognition.onstart = () => setIsRecognizing(true);
-      recognition.onend = () => setIsRecognizing(false);
-      recognition.onresult = (event: any) => {
-        const transcript = Array.from(event.results).map((r: any) => r[0].transcript).join('');
-        setFollowUpQuery(transcript);
-      };
-      recognitionRef.current = recognition;
-    }
-  }, []);
-
-  const handleAskTutor = async (question: Question) => {
-    if (!followUpQuery.trim() || isAsking) return;
-    const query = followUpQuery.trim();
-    setChatHistory(prev => [...prev, { role: 'user', content: query }]);
-    setFollowUpQuery('');
-    setIsAsking(true);
-
-    try {
-      const response = await askFollowUpQuestion(question, chatHistory, query);
-      setChatHistory(prev => [...prev, { role: 'model', content: response }]);
-    } catch (err: any) {
-      alert("答疑暂时不可用，请稍后再试。");
-    } finally {
-      setIsAsking(false);
-    }
-  };
-
   const toggleChat = (id: string) => {
     if (activeChatId === id) {
       setActiveChatId(null);
@@ -90,34 +52,10 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
       setActiveChatId(id);
       setChatHistory([]);
     }
-    setFollowUpQuery('');
   };
 
-  const toggleGroup = (groupName: string) => {
-    setExpandedGroups(prev => ({
-      ...prev,
-      [groupName]: !prev[groupName]
-    }));
-  };
-
-  const knowledgeMap = useMemo(() => {
-    const map: Record<string, { count: number; questions: WrongQuestion[] }> = {};
-    history.forEach(q => {
-      if (!map[q.grammarPoint]) {
-        map[q.grammarPoint] = { count: 0, questions: [] };
-      }
-      map[q.grammarPoint].count++;
-      map[q.grammarPoint].questions.push(q);
-    });
-    return map;
-  }, [history]);
-
-  const sortedPoints = useMemo(() => {
-    const entries = Object.entries(knowledgeMap) as Array<[string, { count: number; questions: WrongQuestion[] }]>;
-    return entries.sort((a, b) => b[1].count - a[1].count);
-  }, [knowledgeMap]);
-
-  const groupedData = useMemo(() => {
+  // Explicitly type groupedData to ensure Object.entries works as expected and prevent 'unknown' inference
+  const groupedData = useMemo<Record<string, WrongQuestion[]>>(() => {
     const currentList = activeTab === 'details' ? history : savedHistory;
     const map: Record<string, WrongQuestion[]> = {};
     currentList.forEach(q => {
@@ -127,296 +65,171 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
     return map;
   }, [activeTab, history, savedHistory]);
 
-  const fetchDeepDive = async (point: string) => {
-    if (isGlobalLoading || loadingPoints[point]) return;
-    
-    setIsGlobalLoading(true);
-    setErrorPoints(prev => ({ ...prev, [point]: false }));
-    setLoadingPoints(prev => ({ ...prev, [point]: true }));
-    
-    try {
-      const data = await getGrammarDeepDive(point, knowledgeMap[point].questions);
-      setDeepDives(prev => ({ ...prev, [point]: data }));
-    } catch (err: any) {
-      setErrorPoints(prev => ({ ...prev, [point]: true }));
-    } finally {
-      setLoadingPoints(prev => ({ ...prev, [point]: false }));
-      setTimeout(() => setIsGlobalLoading(false), 1000);
+  // Explicitly type knowledgeMap to avoid 'unknown' inference in downstream memos and views
+  const knowledgeMap = useMemo<Record<string, { count: number; questions: WrongQuestion[] }>>(() => {
+    const map: Record<string, { count: number; questions: WrongQuestion[] }> = {};
+    history.forEach(q => {
+      if (!map[q.grammarPoint]) map[q.grammarPoint] = { count: 0, questions: [] };
+      map[q.grammarPoint].count++;
+      map[q.grammarPoint].questions.push(q);
+    });
+    return map;
+  }, [history]);
+
+  // Use explicit typing for sortedPoints to prevent 'unknown' property errors when mapping in the JSX
+  const sortedPoints = useMemo<[string, { count: number; questions: WrongQuestion[] }][]>(() => {
+    return (Object.entries(knowledgeMap) as [string, { count: number; questions: WrongQuestion[] }][])
+      .sort((a, b) => b[1].count - a[1].count);
+  }, [knowledgeMap]);
+
+  const handleDeleteItem = (e: React.MouseEvent, q: WrongQuestion) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (confirm("确定要删除这条记录吗？")) {
+      if (activeTab === 'details') onDeleteWrong(q.timestamp, q.question);
+      else onDeleteSaved(q.timestamp, q.question);
     }
   };
 
-  const handleTogglePoint = (point: string) => {
+  const handleClear = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (activeTab === 'details') onClear('details');
+    else if (activeTab === 'saved') onClear('saved');
+  };
+
+  const handleTogglePoint = async (point: string) => {
     if (selectedPoint === point) {
       setSelectedPoint(null);
       return;
     }
     setSelectedPoint(point);
-    if (!deepDives[point] && knowledgeMap[point]) {
-      fetchDeepDive(point);
+    if (!deepDives[point]) {
+      setLoadingPoints(p => ({ ...p, [point]: true }));
+      try {
+        const data = await getGrammarDeepDive(point, knowledgeMap[point].questions);
+        setDeepDives(p => ({ ...p, [point]: data }));
+      } catch (e) {
+        setErrorPoints(p => ({ ...p, [point]: true }));
+      } finally {
+        setLoadingPoints(p => ({ ...p, [point]: false }));
+      }
     }
-  };
-
-  const getDifficultyColor = (diff?: string) => {
-    switch(diff) {
-      case '简单': return 'bg-blue-50 text-blue-600 border-blue-100';
-      case '中等': return 'bg-violet-50 text-violet-600 border-violet-100';
-      case '较难': return 'bg-orange-50 text-orange-600 border-orange-100';
-      default: return 'bg-gray-50 text-gray-500 border-gray-100';
-    }
-  };
-
-  const handleDeleteItem = (e: React.MouseEvent, timestamp: number) => {
-    e.stopPropagation();
-    if (confirm("确定要从列表中移除这条记录吗？")) {
-      if (activeTab === 'details') onDeleteWrong(timestamp);
-      else onDeleteSaved(timestamp);
-    }
-  };
-
-  const handleClearCurrent = () => {
-    if (activeTab === 'details') onClear('details');
-    else if (activeTab === 'saved') onClear('saved');
   };
 
   return (
-    <div className="flex-1 flex flex-col bg-[#FDFCF8] min-h-screen relative overflow-hidden">
+    <div className="flex-1 flex flex-col bg-[#FDFCF8] min-h-screen">
       <div className="sticky top-0 z-50 bg-white/95 backdrop-blur-md shadow-sm border-b border-gray-100">
         <header className="px-6 pt-6 pb-2 flex justify-between items-center">
           <div className="flex items-center gap-4">
             <button onClick={onBack} className="w-10 h-10 flex items-center justify-center rounded-full bg-gray-50 text-gray-400 active:scale-90 transition-all">
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7"/></svg>
             </button>
-            <div>
-              <h1 className="text-xl font-black text-gray-900 tracking-tight">语法笔记</h1>
-              <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">Mastery Notes</p>
-            </div>
+            <h1 className="text-xl font-black text-gray-900">语法笔记</h1>
           </div>
-          <div className="flex items-center gap-2">
-            {(activeTab === 'details' && history.length > 0) || (activeTab === 'saved' && savedHistory.length > 0) ? (
-              <button onClick={handleClearCurrent} className="px-4 py-2 text-[11px] font-black text-red-400 bg-red-50 rounded-xl active:scale-95 transition-all">清空当前页</button>
-            ) : null}
-          </div>
+          {(activeTab === 'details' && history.length > 0) || (activeTab === 'saved' && savedHistory.length > 0) ? (
+            <button onClick={handleClear} className="px-4 py-2 text-[11px] font-black text-red-500 bg-red-50 rounded-xl active:scale-95">清空当前页</button>
+          ) : null}
         </header>
 
         <div className="px-6 py-4 flex gap-2 overflow-x-auto no-scrollbar">
-          <button onClick={() => setActiveTab('summary')} className={`px-4 py-2.5 rounded-xl text-[11px] font-black transition-all whitespace-nowrap border-2 ${activeTab === 'summary' ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-white border-gray-100 text-gray-400'}`}>📝 考点提炼</button>
-          <button onClick={() => setActiveTab('details')} className={`px-4 py-2.5 rounded-xl text-[11px] font-black transition-all whitespace-nowrap border-2 flex items-center gap-2 ${activeTab === 'details' ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-white border-gray-100 text-gray-400'}`}>
-            <span>📜 错题集</span>
-            <span className={`px-1.5 py-0.5 rounded-md text-[9px] ${activeTab === 'details' ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-400'}`}>{history.length}</span>
-          </button>
-          <button onClick={() => setActiveTab('saved')} className={`px-4 py-2.5 rounded-xl text-[11px] font-black transition-all whitespace-nowrap border-2 flex items-center gap-2 ${activeTab === 'saved' ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-white border-gray-100 text-gray-400'}`}>
-            <span>⭐ 我的收藏</span>
-            <span className={`px-1.5 py-0.5 rounded-md text-[9px] ${activeTab === 'saved' ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-400'}`}>{savedHistory.length}</span>
-          </button>
+          {(['summary', 'details', 'saved'] as const).map(tab => (
+            <button 
+              key={tab} 
+              onClick={() => setActiveTab(tab)} 
+              className={`px-4 py-2.5 rounded-xl text-[11px] font-black transition-all border-2 ${activeTab === tab ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-white border-gray-100 text-gray-400'}`}
+            >
+              {tab === 'summary' ? '📝 考点提炼' : tab === 'details' ? `📜 错题集 (${history.length})` : `⭐ 收藏本 (${savedHistory.length})`}
+            </button>
+          ))}
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto no-scrollbar">
-        {(activeTab === 'summary' && history.length === 0) || (activeTab === 'details' && history.length === 0) || (activeTab === 'saved' && savedHistory.length === 0) ? (
-          <main className="flex flex-col items-center justify-center p-12 text-center mt-20">
-            <div className="w-32 h-32 bg-indigo-50 rounded-full flex items-center justify-center text-5xl mb-6 grayscale opacity-50">✍️</div>
-            <h3 className="text-lg font-bold text-gray-900 mb-2">{activeTab === 'saved' ? '收藏夹暂无内容' : '笔记簿空空如也'}</h3>
-            <p className="text-sm text-gray-400 leading-relaxed">{activeTab === 'saved' ? '在做题时点击星星图标，可以收藏想要复习的题目。' : '开始练习，AI 将会自动为你整理错题中的核心考点。'}</p>
-          </main>
-        ) : (
-          <main className="p-6 space-y-8 animate-fadeIn pb-24">
-            {activeTab === 'summary' ? (
-              <div className="space-y-6">
-                {sortedPoints.length > 0 && (
-                  <section className="bg-gradient-to-br from-indigo-700 to-violet-700 rounded-[32px] p-8 text-white shadow-xl shadow-indigo-100 relative overflow-hidden">
-                    <div className="absolute -right-8 -top-8 w-32 h-32 bg-white/10 rounded-full blur-2xl"></div>
-                    <div className="relative z-10">
-                      <p className="text-white/60 text-[10px] font-black uppercase tracking-widest mb-4">Focus Analysis</p>
-                      <h2 className="text-2xl font-black mb-6 leading-tight">你需要重点关注<br/><span className="text-yellow-300">#{sortedPoints[0][0]}</span></h2>
-                      <div className="flex items-center gap-4 p-4 bg-white/10 rounded-2xl border border-white/10 mt-4">
-                        <div className="text-2xl">🎯</div>
-                        <p className="text-xs text-white/90 font-medium leading-relaxed italic">该考点错误率最高，AI 建议你优先复习相关概念。</p>
-                      </div>
-                    </div>
-                  </section>
+      <div className="flex-1 overflow-y-auto pb-24 px-6 pt-6">
+        {Object.keys(groupedData).length === 0 && activeTab !== 'summary' ? (
+          <div className="flex flex-col items-center justify-center h-64 text-gray-300">
+            <span className="text-6xl mb-4">🍃</span>
+            <p className="font-bold">暂无数据</p>
+          </div>
+        ) : activeTab === 'summary' ? (
+          <div className="space-y-4">
+            {sortedPoints.map(([point, data]) => (
+              <div key={point} className="bg-white rounded-[24px] border border-gray-100 overflow-hidden transition-all">
+                <button onClick={() => handleTogglePoint(point)} className="w-full p-6 flex justify-between items-center text-left">
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center font-black">{data.count}</div>
+                    <span className="font-bold text-gray-900">{point}</span>
+                  </div>
+                  <svg className={`w-5 h-5 text-gray-300 transition-transform ${selectedPoint === point ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"/></svg>
+                </button>
+                {selectedPoint === point && (
+                  <div className="px-6 pb-6 border-t border-gray-50 animate-fadeIn pt-4 space-y-4">
+                    {loadingPoints[point] ? (
+                      <div className="py-8 flex justify-center"><div className="w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>
+                    ) : deepDives[point] ? (
+                      <>
+                        <div className="p-4 bg-indigo-50/50 rounded-2xl">
+                          <h6 className="text-[10px] font-black text-indigo-700 uppercase mb-2">考点讲解</h6>
+                          <p className="text-[13px] text-indigo-900 leading-relaxed">{deepDives[point].lecture}</p>
+                        </div>
+                        <div className="p-4 bg-red-50/50 rounded-2xl">
+                          <h6 className="text-[10px] font-black text-red-700 uppercase mb-2">典型错因</h6>
+                          <p className="text-[13px] text-red-900 leading-relaxed italic">{deepDives[point].mistakeAnalysis}</p>
+                        </div>
+                        {/* Render tips using a safe map call with a check for existence to avoid Property 'map' does not exist on type 'unknown' errors */}
+                        {deepDives[point].tips && deepDives[point].tips.length > 0 && (
+                          <div className="p-4 bg-amber-50/50 rounded-2xl">
+                            <h6 className="text-[10px] font-black text-amber-700 uppercase mb-2">避坑指南</h6>
+                            <ul className="space-y-1">
+                              {deepDives[point].tips.map((tip, idx) => (
+                                <li key={idx} className="text-[12px] text-amber-900 flex gap-2">
+                                  <span className="text-amber-400">●</span>
+                                  <span>{tip}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        <button onClick={() => onStartQuiz(point)} className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black text-sm active:scale-95 shadow-lg">专项练习</button>
+                      </>
+                    ) : <p className="text-center text-xs text-gray-400 py-4">无法获取解析，请重试</p>}
+                  </div>
                 )}
-                <div className="space-y-4">
-                  {sortedPoints.map(([point, data]) => (
-                    <div key={point} className={`bg-white rounded-[28px] border transition-all duration-300 ${selectedPoint === point ? 'ring-2 ring-indigo-500 border-transparent shadow-lg' : 'border-gray-100'}`}>
-                      <button onClick={() => handleTogglePoint(point)} className="w-full p-6 flex items-center justify-between text-left">
-                        <div className="flex items-center gap-4">
-                          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl shadow-sm ${data.count >= 5 ? 'bg-red-50 text-red-500' : 'bg-indigo-50 text-indigo-500'}`}>
-                            {data.count >= 5 ? '🔥' : '💡'}
-                          </div>
-                          <div>
-                            <h5 className="font-bold text-gray-900">{point}</h5>
-                            <p className="text-xs text-gray-400 font-medium">涉及 {data.count} 道错题</p>
-                          </div>
-                        </div>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-transform ${selectedPoint === point ? 'rotate-180 bg-indigo-50 text-indigo-600' : 'bg-gray-50 text-gray-300'}`}>
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7"/></svg>
-                        </div>
-                      </button>
-                      
-                      {selectedPoint === point && (
-                        <div className="px-6 pb-6 animate-fadeIn">
-                          <div className="pt-4 border-t border-gray-50 space-y-5">
-                            {loadingPoints[point] ? (
-                              <div className="py-8 flex flex-col items-center justify-center space-y-3">
-                                <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
-                                <p className="text-[11px] text-gray-400 font-bold">AI 正在生成专项解析...</p>
-                              </div>
-                            ) : errorPoints[point] ? (
-                              <div className="py-8 flex flex-col items-center justify-center space-y-4">
-                                 <div className="text-3xl">⏳</div>
-                                 <p className="text-[13px] text-gray-500 font-bold">解析生成失败，请重试</p>
-                                 <button onClick={() => fetchDeepDive(point)} className="px-6 py-2.5 bg-indigo-50 text-indigo-600 rounded-full text-xs font-black">重试</button>
-                              </div>
-                            ) : deepDives[point] ? (
-                              <div className="space-y-4">
-                                <div className="bg-indigo-50/50 p-5 rounded-[22px] border border-indigo-100/50">
-                                  <h6 className="text-[12px] font-black text-indigo-700 uppercase tracking-tight mb-2 flex items-center gap-2"><span>📘</span> 考点精讲</h6>
-                                  <p className="text-[13px] text-indigo-900 font-medium leading-relaxed">{deepDives[point].lecture}</p>
-                                </div>
-                                <div className="bg-red-50/50 p-5 rounded-[22px] border border-red-100/50">
-                                  <h6 className="text-[12px] font-black text-red-700 uppercase tracking-tight mb-2 flex items-center gap-2"><span>🔍</span> 错因分析</h6>
-                                  <p className="text-[13px] text-red-900 font-medium leading-relaxed italic">{deepDives[point].mistakeAnalysis}</p>
-                                </div>
-                                <div className="bg-amber-50/50 p-5 rounded-[22px] border border-amber-100/50">
-                                  <h6 className="text-[12px] font-black text-amber-700 uppercase tracking-tight mb-2 flex items-center gap-2"><span>💡</span> 避坑指南</h6>
-                                  <ul className="space-y-2">
-                                    {deepDives[point].tips.map((tip, idx) => (
-                                      <li key={idx} className="text-[12px] text-amber-900 font-bold flex gap-2">
-                                        <span className="opacity-40">{idx + 1}.</span>
-                                        <span>{tip}</span>
-                                      </li>
-                                    ))}
-                                  </ul>
-                                </div>
-                                <button onClick={() => onStartQuiz(point)} className="w-full py-4.5 bg-indigo-600 text-white rounded-[24px] font-black text-[15px] shadow-lg active:scale-95 transition-all">开启专项突破</button>
-                              </div>
-                            ) : null}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
               </div>
-            ) : (
-              <div className="space-y-8">
-                {(Object.entries(groupedData) as [string, WrongQuestion[]][]).map(([point, items], gIdx) => (
-                  <div key={point} className="space-y-4">
-                    <div className="sticky top-[-1px] z-20 bg-[#FDFCF8] py-2">
-                      <button onClick={() => toggleGroup(point)} className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl border shadow-sm transition-all ${expandedGroups[point] !== false ? 'bg-white border-indigo-100' : 'bg-gray-50 border-gray-100 opacity-60'}`}>
-                        <div className="flex items-center gap-3">
-                          <span className="w-8 h-8 flex items-center justify-center bg-indigo-50 text-indigo-600 rounded-lg text-xs font-black">{items.length}</span>
-                          <h4 className="text-[15px] font-black text-gray-800 tracking-tight">{point}</h4>
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-8">
+            {Object.entries(groupedData).map(([point, items]) => (
+              <div key={point} className="space-y-4">
+                <div className="flex items-center gap-3 py-2">
+                   <div className="w-1.5 h-6 bg-indigo-500 rounded-full"></div>
+                   <h3 className="font-black text-gray-900">{point}</h3>
+                </div>
+                {items.map((q, idx) => (
+                  <div key={q.timestamp || idx} className="bg-white p-6 rounded-[28px] border border-gray-100 shadow-sm relative group">
+                    <button 
+                      onClick={(e) => handleDeleteItem(e, q)}
+                      className="absolute top-4 right-4 w-10 h-10 flex items-center justify-center rounded-full bg-red-50 text-red-500 active:scale-90 transition-all shadow-sm z-10"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                    </button>
+                    <p className="text-[15px] font-bold text-gray-800 mb-4 pr-8">{q.question}</p>
+                    <div className="space-y-2 mb-4">
+                      {q.options.map((opt, i) => (
+                        <div key={i} className={`p-3 rounded-xl text-[13px] border ${i === q.answerIndex ? 'bg-green-50 border-green-200 text-green-700 font-bold' : i === q.userAnswerIndex ? 'bg-red-50 border-red-200 text-red-700' : 'bg-gray-50 border-gray-50 text-gray-400'}`}>
+                          {String.fromCharCode(65 + i)}. {opt}
                         </div>
-                        <div className={`transition-transform duration-300 ${expandedGroups[point] !== false ? 'rotate-180 text-indigo-500' : 'text-gray-300'}`}>
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7"/></svg>
-                        </div>
-                      </button>
+                      ))}
                     </div>
-
-                    {expandedGroups[point] !== false && (
-                      <div className="space-y-4 animate-fadeIn">
-                        {items.map((q, idx) => {
-                          const uniqueId = `${q.question}-${idx}-${gIdx}`;
-                          const isChatting = activeChatId === uniqueId;
-                          return (
-                            <div key={idx} className="bg-white p-6 rounded-[28px] border border-gray-100 shadow-sm relative ml-2">
-                              <div className="flex items-center justify-between mb-4">
-                                <span className={`px-2 py-1 text-[10px] font-black rounded-lg border ${getDifficultyColor(q.difficulty)}`}>{q.difficulty || '中等'}</span>
-                                <button 
-                                  onClick={(e) => handleDeleteItem(e, q.timestamp)}
-                                  className="w-8 h-8 flex items-center justify-center rounded-full bg-red-50 text-red-400 transition-all active:scale-95 shadow-sm"
-                                >
-                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                                </button>
-                              </div>
-                              <p className="text-[15px] text-gray-800 font-bold mb-4 leading-relaxed">{q.question}</p>
-                              
-                              <div className="grid grid-cols-1 gap-2 mb-5">
-                                {q.options.map((opt, i) => (
-                                  <div key={i} className={`p-3 rounded-xl text-[13px] border flex gap-2 ${i === q.answerIndex ? 'bg-green-50 border-green-200 text-green-700 font-bold' : i === q.userAnswerIndex ? 'bg-red-50 border-red-200 text-red-700' : 'bg-gray-50 border-gray-50 text-gray-400'}`}>
-                                    <span className="font-black opacity-40">{String.fromCharCode(65 + i)}.</span>
-                                    <span>{opt}</span>
-                                  </div>
-                                ))}
-                              </div>
-
-                              <div className="p-5 bg-gray-50/80 rounded-[20px] border border-gray-100 relative overflow-hidden mb-4">
-                                <div className="absolute top-0 left-0 w-1 h-full bg-indigo-200"></div>
-                                <div className="flex items-center justify-between mb-2">
-                                  <div className="flex items-center gap-2">
-                                    <div className="w-6 h-6 bg-white rounded-lg flex items-center justify-center text-[10px] shadow-sm border border-gray-100">💡</div>
-                                    <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">详解与翻译</span>
-                                  </div>
-                                  <button onClick={() => toggleChat(uniqueId)} className={`px-3 py-1 rounded-full text-[10px] font-black transition-all ${isChatting ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-600 border border-indigo-100'}`}>
-                                    {isChatting ? '关闭提问' : '💬 问问AI助教'}
-                                  </button>
-                                </div>
-                                <p className="text-[13px] text-gray-600 leading-relaxed font-medium">{q.explanation}</p>
-                              </div>
-
-                              {isChatting && (
-                                <div className="mt-4 p-5 bg-indigo-50/50 rounded-[24px] border border-indigo-100/50 animate-fadeIn">
-                                  <div className="space-y-3 mb-4 max-h-[200px] overflow-y-auto no-scrollbar">
-                                    {chatHistory.length === 0 && (
-                                      <p className="text-[11px] text-indigo-400 font-bold italic text-center py-2">对这道题还有不理解的地方？在下方问问我吧！</p>
-                                    )}
-                                    {chatHistory.map((msg, idx) => (
-                                      <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-fadeIn`}>
-                                        <div className={`max-w-[85%] p-3 rounded-2xl text-[12px] font-medium leading-relaxed ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-br-none' : 'bg-white text-gray-700 rounded-bl-none border border-indigo-50 shadow-sm'}`}>
-                                          {msg.content}
-                                        </div>
-                                      </div>
-                                    ))}
-                                    {isAsking && (
-                                      <div className="flex justify-start">
-                                        <div className="bg-white p-2 rounded-xl flex gap-1 animate-pulse border border-indigo-50">
-                                          <div className="w-1 h-1 bg-indigo-200 rounded-full"></div>
-                                          <div className="w-1 h-1 bg-indigo-300 rounded-full"></div>
-                                          <div className="w-1 h-1 bg-indigo-400 rounded-full"></div>
-                                        </div>
-                                      </div>
-                                    )}
-                                    <div ref={chatEndRef} />
-                                  </div>
-                                  
-                                  <div className="flex gap-2">
-                                    <div className="relative flex-1">
-                                      <input
-                                        type="text"
-                                        value={followUpQuery}
-                                        onChange={(e) => setFollowUpQuery(e.target.value)}
-                                        onKeyPress={(e) => e.key === 'Enter' && handleAskTutor(q)}
-                                        placeholder={isRecognizing ? "聆听中..." : "输入疑问..."}
-                                        className={`w-full py-2.5 pl-4 pr-10 bg-white rounded-xl border-none text-[12px] font-bold shadow-sm focus:ring-2 focus:ring-indigo-500/20 ${isRecognizing ? 'ring-2 ring-indigo-500 bg-indigo-50' : ''}`}
-                                      />
-                                      <button 
-                                        onClick={() => isRecognizing ? recognitionRef.current?.stop() : recognitionRef.current?.start()}
-                                        className={`absolute right-1 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-lg transition-all ${isRecognizing ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:text-indigo-400'}`}
-                                      >
-                                        🎙️
-                                      </button>
-                                    </div>
-                                    <button 
-                                      onClick={() => handleAskTutor(q)}
-                                      disabled={!followUpQuery.trim() || isAsking}
-                                      className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${!followUpQuery.trim() || isAsking ? 'bg-gray-100 text-gray-300' : 'bg-indigo-600 text-white active:scale-95'}`}
-                                    >
-                                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
-                                    </button>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
+                    <div className="p-4 bg-gray-50 rounded-2xl text-[12px] text-gray-500 leading-relaxed font-medium">
+                      <span className="font-black text-indigo-600 block mb-1">💡 详解：</span>
+                      {q.explanation}
+                    </div>
                   </div>
                 ))}
               </div>
-            )}
-          </main>
+            ))}
+          </div>
         )}
       </div>
     </div>
