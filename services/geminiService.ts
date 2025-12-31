@@ -33,6 +33,10 @@ async function withRetry<T>(
   return execute(0);
 }
 
+/**
+ * 用户明确要求使用 2.5 Lite 模型 ('gemini-flash-lite-latest')
+ * 该模型在保持高效推理的同时，更适合移动端轻量级应用。
+ */
 const TEXT_MODEL = 'gemini-flash-lite-latest';
 
 const SCHEMA = {
@@ -42,7 +46,7 @@ const SCHEMA = {
     properties: {
       id: { type: Type.STRING },
       question: { type: Type.STRING },
-      translation: { type: Type.STRING }, // 翻译字段
+      translation: { type: Type.STRING }, 
       options: { type: Type.ARRAY, items: { type: Type.STRING } },
       answerIndex: { type: Type.INTEGER },
       explanation: { type: Type.STRING },
@@ -71,7 +75,7 @@ export const generateGrammarQuestions = async (
         1. 题目语境真实，符合高考逻辑。
         2. 解析需包含结构分析和关键词提示。
         3. 必须为题目提供准确的【中文翻译】。
-        4. 仅返回 JSON 数据，不带 Markdown 格式。`,
+        4. 仅返回 JSON 数据，严禁包含 Markdown 标记。`,
         responseMimeType: "application/json",
         responseSchema: SCHEMA,
         temperature: 0.4
