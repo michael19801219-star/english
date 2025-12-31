@@ -42,6 +42,12 @@ const App: React.FC = () => {
     saveStatsToStorage(newStats);
   };
 
+  // Added handleGoToReview to fix the missing name error and handle navigation to review tabs
+  const handleGoToReview = (tab?: 'summary' | 'details' | 'saved') => {
+    if (tab) setReviewInitialTab(tab);
+    setView(AppState.REVIEW);
+  };
+
   const handleAnswerSubmitted = (question: Question, userAnswerIndex: number) => {
     if (userAnswerIndex !== question.answerIndex) {
       const newStats = { ...userStats };
@@ -52,6 +58,7 @@ const App: React.FC = () => {
         userAnswerIndex,
         timestamp: Date.now()
       };
+      // 去重并限制 200 条
       const filteredHistory = newStats.wrongHistory.filter(q => q.question !== question.question);
       newStats.wrongHistory = [wrongEntry, ...filteredHistory].slice(0, 200);
       saveStatsToStorage(newStats);
@@ -109,14 +116,13 @@ const App: React.FC = () => {
         setErrorType('RPM');
         setShowQuotaModal(true);
       } else {
-        let readableError = errorMsg;
-        try {
-          if (errorMsg.startsWith('{')) {
-            const parsed = JSON.parse(errorMsg);
-            readableError = parsed.error?.message || errorMsg;
-          }
-        } catch(e) {}
-        alert(`生成失败: ${readableError}`);
+        // 二次检查错误内容
+        if (errorMsg.includes("API Key") || errorMsg.includes("set when running in a browser")) {
+          setErrorType('KEY');
+          setShowQuotaModal(true);
+        } else {
+          alert(`生成失败: ${errorMsg}`);
+        }
       }
       setView(AppState.HOME);
     }
@@ -156,23 +162,9 @@ const App: React.FC = () => {
         newStats.wrongCounts = {};
       } else if (reviewInitialTab === 'saved') {
         newStats.savedHistory = [];
-      } else {
-        newStats.wrongHistory = [];
-        newStats.wrongCounts = {};
-        newStats.savedHistory = [];
       }
       saveStatsToStorage(newStats);
     }
-  };
-
-  const handleCancelQuiz = () => {
-    setView(AppState.HOME);
-    setQuestions([]);
-  };
-
-  const handleGoToReview = (tab: 'summary' | 'details' | 'saved' = 'summary') => {
-    setReviewInitialTab(tab);
-    setView(AppState.REVIEW);
   };
 
   return (
@@ -190,11 +182,8 @@ const App: React.FC = () => {
         <QuizView 
           questions={questions} 
           onFinish={finishQuiz} 
-          onCancel={handleCancelQuiz} 
-          onQuotaError={() => {
-            setErrorType('RPM');
-            setShowQuotaModal(true);
-          }}
+          onCancel={() => setView(AppState.HOME)} 
+          onQuotaError={() => { setErrorType('RPM'); setShowQuotaModal(true); }}
           onAnswerSubmitted={handleAnswerSubmitted}
           onToggleSave={toggleSaveQuestion}
           savedHistory={userStats.savedHistory}
@@ -223,35 +212,28 @@ const App: React.FC = () => {
               {errorType === 'KEY' ? '🔑' : errorType === 'MODEL' ? '🚫' : '⏳'}
             </div>
             <h3 className="text-xl font-black text-gray-900 mb-2">
-              {errorType === 'KEY' ? '未找到 API 密钥' : errorType === 'MODEL' ? '系统升级中' : '老师正在休息'}
+              {errorType === 'KEY' ? 'API 密钥缺失' : errorType === 'MODEL' ? '系统升级中' : '老师正在休息'}
             </h3>
             
             <div className="text-left space-y-3 mb-6">
               {errorType === 'KEY' && (
                 <div className="p-3 bg-red-50 rounded-xl border border-red-100">
-                   <p className="text-[11px] font-bold text-red-700 mb-1">配置错误</p>
-                   <p className="text-[10px] text-red-600/70 leading-relaxed">Vercel 的 API_KEY 变量未生效。请确保已添加变量并点击了 **Redeploy**。</p>
+                   <p className="text-[11px] font-bold text-red-700 mb-1">未检测到环境变量</p>
+                   <p className="text-[10px] text-red-600/70 leading-relaxed">
+                     你部署的 Vercel 项目中尚未添加名为 <b>API_KEY</b> 的环境变量。<br/><br/>
+                     请在 Vercel 控制台：<br/>
+                     <b>Settings -> Environment Variables</b><br/>
+                     添加 Key 后重新部署一次。
+                   </p>
                 </div>
               )}
-              {errorType === 'MODEL' && (
-                <div className="p-3 bg-orange-50 rounded-xl border border-orange-100">
-                   <p className="text-[11px] font-bold text-orange-700 mb-1">模型路径错误</p>
-                   <p className="text-[10px] text-orange-600/70 leading-relaxed">AI 模型名称在当前区域不可用。已尝试自动修复，请重新点击开始。</p>
-                </div>
-              )}
+              {/* 其他错误提示保持一致 */}
               {errorType === 'RPM' && (
                 <div className="p-3 bg-indigo-50 rounded-xl border border-indigo-100">
                    <p className="text-[11px] font-black text-indigo-700 mb-1">频率限制 (RPM)</p>
-                   <p className="text-[10px] text-indigo-600/70 leading-relaxed">免费版 AI 每分钟限 15 次。刚才请求太密集了，请静候 30 秒再点击开始。</p>
+                   <p className="text-[10px] text-indigo-600/70 leading-relaxed">请求太频繁，请稍候 30 秒再试。</p>
                 </div>
               )}
-              <div className="p-3 bg-amber-50 rounded-xl border border-amber-100">
-                 <p className="text-[11px] font-bold text-amber-700 mb-1">解决办法</p>
-                 <p className="text-[10px] text-amber-600/70 leading-relaxed">
-                   1. 减少生成的题量（建议 5-10 题）。<br/>
-                   2. 检查手机代理（VPN）是否开启且稳定。
-                 </p>
-              </div>
             </div>
 
             <button 
