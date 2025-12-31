@@ -2,37 +2,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Question, Difficulty, ChatMessage, WrongQuestion } from "../types";
 
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-async function withRetry<T>(
-  fn: () => Promise<T>, 
-  retries = 6, 
-  onRetry?: (count: number, nextWait: number) => void
-): Promise<T> {
-  const maxRetries = retries;
-  
-  const execute = async (attempt: number): Promise<T> => {
-    try {
-      return await fn();
-    } catch (error: any) {
-      const errorStr = JSON.stringify(error).toLowerCase();
-      const isQuota = errorStr.includes('429') || errorStr.includes('quota');
-      const isServerErr = errorStr.includes('500') || errorStr.includes('503') || errorStr.includes('504');
-
-      if ((isQuota || isServerErr) && attempt < maxRetries) {
-        const baseWait = isQuota ? 5000 : 2000;
-        const waitTime = Math.min(baseWait * Math.pow(2, attempt) + Math.random() * 1000, 30000);
-        if (onRetry) onRetry(attempt + 1, Math.round(waitTime / 1000));
-        await delay(waitTime);
-        return execute(attempt + 1);
-      }
-      throw error;
-    }
-  };
-
-  return execute(0);
-}
-
 /**
  * 强制使用 2.5 Lite 模型 ('gemini-flash-lite-latest')
  */
@@ -62,10 +31,12 @@ export const generateGrammarQuestions = async (
   difficulty: Difficulty,
   onProgress?: (msg: string) => void
 ): Promise<Question[]> => {
-  return withRetry(async () => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    const pointsDesc = targetPoints.length > 0 ? `重点考察：${targetPoints.join('、')}。` : "涵盖高考核心考点。";
-    
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const pointsDesc = targetPoints.length > 0 ? `重点考察：${targetPoints.join('、')}。` : "涵盖高考核心考点。";
+  
+  if (onProgress) onProgress("AI 正在构思题目...");
+
+  try {
     const response = await ai.models.generateContent({
       model: TEXT_MODEL,
       contents: `生成 ${count} 道单项填空练习题。难度：${difficulty}。${pointsDesc}`,
@@ -82,16 +53,13 @@ export const generateGrammarQuestions = async (
     });
     
     const text = response.text || "[]";
-    try {
-      const data = JSON.parse(text);
-      if (!Array.isArray(data) || data.length === 0) throw new Error("EMPTY_DATA");
-      return data;
-    } catch (e) {
-      throw new Error("FORMAT_ERROR");
-    }
-  }, 6, (count, nextWait) => {
-    if (onProgress) onProgress(`AI 正在排队中 (第 ${count} 次重试)，约 ${nextWait} 秒后再次尝试...`);
-  });
+    const data = JSON.parse(text);
+    if (!Array.isArray(data) || data.length === 0) throw new Error("EMPTY_DATA");
+    return data;
+  } catch (e) {
+    console.error("Generate error:", e);
+    throw new Error("GENERATION_FAILED");
+  }
 };
 
 export const askFollowUpQuestion = async (
@@ -99,8 +67,8 @@ export const askFollowUpQuestion = async (
   history: ChatMessage[],
   userQuery: string
 ): Promise<string> => {
-  return withRetry(async () => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  try {
     const response = await ai.models.generateContent({
       model: TEXT_MODEL,
       contents: `针对题目的追问："${userQuery}"`,
@@ -110,17 +78,20 @@ export const askFollowUpQuestion = async (
       }
     });
     return response.text || "老师正在组织语言，请再问一遍。";
-  }, 2);
+  } catch (e) {
+    console.error("Ask error:", e);
+    return "暂时无法连接 AI 助教，请稍后再试。";
+  }
 };
 
 export const getGrammarDeepDive = async (
   pointName: string,
   wrongQuestions: WrongQuestion[]
 ): Promise<{ lecture: string; mistakeAnalysis: string; tips: string[] }> => {
-  return withRetry(async () => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    const context = wrongQuestions.slice(0, 2).map(q => q.question).join('|');
-    
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const context = wrongQuestions.slice(0, 2).map(q => q.question).join('|');
+  
+  try {
     const response = await ai.models.generateContent({
       model: TEXT_MODEL,
       contents: `生成“${pointName}”的精讲。错题案例：${context}`,
@@ -140,5 +111,12 @@ export const getGrammarDeepDive = async (
       }
     });
     return JSON.parse(response.text || "{}");
-  }, 3);
+  } catch (e) {
+    console.error("Deep dive error:", e);
+    return {
+      lecture: "暂时无法生成详细讲义。",
+      mistakeAnalysis: "请参考错题集的解析内容。",
+      tips: ["多看例句", "分析句子成分", "背诵核心搭配"]
+    };
+  }
 };
