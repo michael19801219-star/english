@@ -2,14 +2,13 @@
 import { UserStats, WrongQuestion } from "../types";
 
 /**
- * 采用全新的、复杂的专属存储桶 ID，避免与公共请求冲突
+ * 切换至更轻量的 keyvalue 服务，并采用更隐蔽的数据传输格式
  */
-const BUCKET_ID = "gaokao_english_pro_sync_v2_final"; 
-const API_BASE = `https://kvdb.io/${BUCKET_ID}`;
+const API_BASE = "https://api.keyvalue.xyz";
+const TOKEN = "gk_zkc_pro_2025"; // 固定 Token 简化路径
 
 export const generateSyncId = () => {
-  // 增加字符复杂度
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; 
+  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ'; 
   let result = '';
   for (let i = 0; i < 6; i++) {
     result += chars.charAt(Math.floor(Math.random() * chars.length));
@@ -18,102 +17,92 @@ export const generateSyncId = () => {
 };
 
 /**
- * 极限压缩：只保留最核心的考试数据，去除所有冗余描述
+ * 将对象转为 Base64 字符串，穿透网络防火墙
  */
-const compressStats = (stats: UserStats): any => {
+const statsToBase64 = (stats: UserStats): string => {
   const simplify = (q: WrongQuestion) => [
-    q.question,        // 0
-    q.options,         // 1
-    q.answerIndex,     // 2
-    q.explanation,     // 3
-    q.grammarPoint,    // 4
-    q.userAnswerIndex, // 5
-    q.timestamp        // 6
+    q.question, q.options, q.answerIndex, q.explanation, q.grammarPoint, q.userAnswerIndex, q.timestamp
   ];
-
-  return {
+  const payload = {
     c: stats.wrongCounts,
-    w: stats.wrongHistory.slice(0, 50).map(simplify), // 减少条数以确保成功率
-    s: stats.savedHistory.slice(0, 30).map(simplify),
-    id: stats.syncId,
+    w: stats.wrongHistory.slice(0, 40).map(simplify), // 进一步缩减体积以适配极端网络
+    s: stats.savedHistory.slice(0, 20).map(simplify),
     t: Date.now()
   };
+  return btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
 };
 
 /**
- * 数据解压还原
+ * 从 Base64 恢复
  */
-const decompressStats = (data: any): UserStats => {
+const base64ToStats = (base64: string, syncId: string): UserStats => {
+  const json = decodeURIComponent(escape(atob(base64)));
+  const data = JSON.parse(json);
   const restore = (q: any[]): WrongQuestion => ({
-    id: `q_${q[6]}`,
-    question: q[0],
-    options: q[1],
-    answerIndex: q[2],
-    explanation: q[3],
-    grammarPoint: q[4],
-    difficulty: '中等',
-    userAnswerIndex: q[5],
-    timestamp: q[6]
+    id: `q_${q[6]}`, question: q[0], options: q[1], answerIndex: q[2], explanation: q[3], grammarPoint: q[4], difficulty: '中等', userAnswerIndex: q[5], timestamp: q[6]
   });
 
   return {
     wrongCounts: data.c || {},
     wrongHistory: (data.w || []).map(restore),
     savedHistory: (data.s || []).map(restore),
-    syncId: data.id,
+    syncId: syncId,
     lastSyncTime: data.t
   };
 };
 
+/**
+ * 云端上传：改用 POST 协议提升安卓兼容性
+ */
 export const uploadToCloud = async (syncId: string, stats: UserStats) => {
-  if (!syncId) throw new Error("SYNC_ID_MISSING");
+  const dataString = statsToBase64(stats);
   
-  const body = JSON.stringify(compressStats(stats));
-
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时
-
-    const response = await fetch(`${API_BASE}/${syncId}`, {
-      method: 'PUT',
-      body: body,
-      headers: { 'Content-Type': 'application/json' },
-      mode: 'cors',
-      cache: 'no-store',
-      signal: controller.signal
+    const response = await fetch(`${API_BASE}/${TOKEN}/${syncId}`, {
+      method: 'POST',
+      body: dataString,
+      headers: { 'Content-Type': 'text/plain' }, // 伪装成纯文本
+      mode: 'cors'
     });
 
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      throw new Error(`HTTP_${response.status}`);
-    }
-
+    if (!response.ok) throw new Error(`ERR_${response.status}`);
     return Date.now();
   } catch (error: any) {
-    console.error("Sync Error:", error);
-    if (error.name === 'AbortError') throw new Error("连接超时：请尝试切换移动 5G 网络");
-    throw new Error("同步受限：请确认未开启广告拦截插件，并建议切换网络环境重试。");
+    console.error("Upload failed", error);
+    throw new Error("云端连接受阻：请尝试切换 5G 流量或使用下方的'手动同步'功能。");
   }
 };
 
+/**
+ * 云端下载
+ */
 export const downloadFromCloud = async (syncId: string): Promise<UserStats | null> => {
-  if (!syncId) return null;
-
   try {
-    const response = await fetch(`${API_BASE}/${syncId}?nocache=${Date.now()}`, {
+    const response = await fetch(`${API_BASE}/${TOKEN}/${syncId}?cb=${Date.now()}`, {
       method: 'GET',
-      mode: 'cors',
-      cache: 'no-store'
+      mode: 'cors'
     });
     
-    if (response.status === 404) return null;
-    if (!response.ok) throw new Error(`HTTP_${response.status}`);
-
-    const data = await response.json();
-    return decompressStats(data);
+    if (response.status === 404 || !response.ok) return null;
+    const base64 = await response.text();
+    if (base64.length < 10) return null;
+    return base64ToStats(base64, syncId);
   } catch (error: any) {
-    console.error("Download Error:", error);
-    throw new Error("云端数据读取失败，请检查网络。");
+    throw new Error("读取失败：网络请求被拦截，建议使用手动同步代码。");
+  }
+};
+
+/**
+ * 手动备份代码：完全不走云端存储，仅通过文本传递
+ */
+export const getManualBackupCode = (stats: UserStats): string => {
+  return statsToBase64(stats);
+};
+
+export const importFromManualCode = (code: string): UserStats | null => {
+  try {
+    return base64ToStats(code, "MANUAL_" + Date.now().toString().slice(-4));
+  } catch (e) {
+    return null;
   }
 };
