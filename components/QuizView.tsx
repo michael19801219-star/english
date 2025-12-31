@@ -9,7 +9,9 @@ interface QuizViewProps {
   onCancel: () => void;
 }
 
-// 健壮的 Base64 解码器
+/**
+ * 健壮的 Base64 解码并处理 PCM 16-bit
+ */
 function decodeBase64(base64: string): Uint8Array {
   try {
     const binaryString = atob(base64);
@@ -24,23 +26,21 @@ function decodeBase64(base64: string): Uint8Array {
   }
 }
 
-// 专业的 PCM 音频解码器
+/**
+ * 将 PCM16 数据转换为 AudioBuffer
+ */
 async function decodeAudioData(data: Uint8Array, ctx: AudioContext, sampleRate: number): Promise<AudioBuffer | null> {
   if (data.length < 2) return null;
-
   try {
-    // 确保字节对齐为 2 (PCM 16-bit)
+    // 强制字节对齐
     const length = Math.floor(data.byteLength / 2) * 2;
-    const alignedData = data.byteOffset % 2 === 0 
-      ? data.buffer.slice(data.byteOffset, data.byteOffset + length)
-      : data.slice(0, length).buffer;
-
-    const dataInt16 = new Int16Array(alignedData);
-    const buffer = ctx.createBuffer(1, dataInt16.length, sampleRate);
+    const buffer = ctx.createBuffer(1, length / 2, sampleRate);
     const channelData = buffer.getChannelData(0);
+    const dataView = new DataView(data.buffer, data.byteOffset, length);
     
-    for (let i = 0; i < dataInt16.length; i++) {
-      channelData[i] = dataInt16[i] / 32768.0;
+    for (let i = 0; i < length / 2; i++) {
+      // 假设为 Little Endian
+      channelData[i] = dataView.getInt16(i * 2, true) / 32768.0;
     }
     return buffer;
   } catch (e) {
@@ -67,9 +67,9 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) =>
   const audioContextRef = useRef<AudioContext | null>(null);
   const recognitionRef = useRef<any>(null);
   
+  // 缓存与引用
   const audioCacheRef = useRef<Map<string, AudioBuffer>>(new Map());
-  const activeSourcesRef = useRef<AudioBufferSourceNode[]>([]);
-  const nextStartTimeRef = useRef<number>(0);
+  const activeSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const stopRequestedRef = useRef<boolean>(false);
 
   useEffect(() => {
@@ -98,42 +98,19 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) =>
 
   const stopAllAudio = () => {
     stopRequestedRef.current = true;
-    activeSourcesRef.current.forEach(source => {
-      try { source.onended = null; source.stop(); } catch (e) {}
-    });
-    activeSourcesRef.current = [];
-    nextStartTimeRef.current = 0;
+    if (activeSourceRef.current) {
+      try {
+        activeSourceRef.current.onended = null;
+        activeSourceRef.current.stop();
+      } catch (e) {}
+      activeSourceRef.current = null;
+    }
     setPlayingMsgIdx(null);
     setIsTTSLoading(false);
   };
 
-  const splitIntoOptimalChunks = (text: string): string[] => {
-    if (!text) return [];
-    // 基础切分
-    const initialSegments = text.split(/([.?!。？！\n]+)/);
-    const result: string[] = [];
-    
-    for (let i = 0; i < initialSegments.length; i += 2) {
-      let s = (initialSegments[i] || "") + (initialSegments[i + 1] || "");
-      // 过滤掉只有标点或太短的无效片段
-      if (!s.trim() || !/[a-zA-Z\u4e00-\u9fa5]/.test(s)) continue;
-
-      if (s.length > 50) {
-        const subSegments = s.split(/([,;，；])/);
-        for (let j = 0; j < subSegments.length; j += 2) {
-          const sub = (subSegments[j] || "") + (subSegments[j + 1] || "");
-          if (sub.trim() && /[a-zA-Z\u4e00-\u9fa5]/.test(sub)) {
-            result.push(sub.trim());
-          }
-        }
-      } else {
-        result.push(s.trim());
-      }
-    }
-    return result;
-  };
-
-  const playTTS = async (fullText: string, msgIdx: number) => {
+  const playTTS = async (text: string, msgIdx: number) => {
+    // 再次点击同一条，则停止
     if (playingMsgIdx === msgIdx) {
       stopAllAudio();
       return;
@@ -150,59 +127,51 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) =>
       const ctx = audioContextRef.current;
       if (ctx.state === 'suspended') await ctx.resume();
 
-      const chunks = splitIntoOptimalChunks(fullText);
-      if (chunks.length === 0) {
+      let buffer: AudioBuffer | null = null;
+
+      // 1. 检查缓存
+      if (audioCacheRef.current.has(text)) {
+        buffer = audioCacheRef.current.get(text)!;
+      } else {
+        // 2. 发起完整生成请求
+        setIsTTSLoading(true);
+        const base64 = await generateTTS(text);
+        if (stopRequestedRef.current) return; // 用户在合成时取消了
+
+        if (!base64) throw new Error("TTS 返回数据为空");
+        
+        const bytes = decodeBase64(base64);
+        buffer = await decodeAudioData(bytes, ctx, 24000);
+        
+        if (buffer) {
+          audioCacheRef.current.set(text, buffer);
+        }
+      }
+
+      if (!buffer || stopRequestedRef.current) {
+        setIsTTSLoading(false);
         setPlayingMsgIdx(null);
         return;
       }
 
-      nextStartTimeRef.current = ctx.currentTime;
-      setIsTTSLoading(true);
+      // 3. 开始播放完整音频
+      setIsTTSLoading(false);
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      
+      activeSourceRef.current = source;
+      source.start(0);
 
-      const processChunk = async (text: string, index: number) => {
-        try {
-          let buffer: AudioBuffer | null = null;
-          if (audioCacheRef.current.has(text)) {
-            buffer = audioCacheRef.current.get(text)!;
-          } else {
-            const base64 = await generateTTS(text);
-            if (!base64) throw new Error("Empty TTS response");
-            const bytes = decodeBase64(base64);
-            buffer = await decodeAudioData(bytes, ctx, 24000);
-            if (buffer) audioCacheRef.current.set(text, buffer);
-          }
-
-          if (stopRequestedRef.current || !buffer) return;
-
-          if (index === 0) setIsTTSLoading(false);
-
-          const source = ctx.createBufferSource();
-          source.buffer = buffer;
-          source.connect(ctx.destination);
-          
-          const startTime = Math.max(nextStartTimeRef.current, ctx.currentTime);
-          source.start(startTime);
-          
-          nextStartTimeRef.current = startTime + buffer.duration;
-          activeSourcesRef.current.push(source);
-
-          source.onended = () => {
-            activeSourcesRef.current = activeSourcesRef.current.filter(s => s !== source);
-            if (activeSourcesRef.current.length === 0 && !stopRequestedRef.current) {
-              setPlayingMsgIdx(null);
-            }
-          };
-        } catch (err) {
-          console.error(`Chunk ${index} error:`, err);
-          if (index === 0) setIsTTSLoading(false);
-          // 如果只有这一个分片且出错了，重置 UI
-          if (chunks.length === 1) setPlayingMsgIdx(null);
+      source.onended = () => {
+        if (activeSourceRef.current === source) {
+          setPlayingMsgIdx(null);
+          activeSourceRef.current = null;
         }
       };
 
-      chunks.forEach((chunk, i) => processChunk(chunk, i));
     } catch (e) {
-      console.error("TTS System Error:", e);
+      console.error("TTS 系统故障:", e);
       setIsTTSLoading(false);
       setPlayingMsgIdx(null);
     }
@@ -218,17 +187,6 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) =>
     try {
       const response = await askFollowUpQuestion(questions[currentIndex], chatHistory, query);
       setChatHistory(prev => [...prev, { role: 'model', content: response }]);
-      
-      // 预热首包
-      const chunks = splitIntoOptimalChunks(response);
-      if (chunks[0]) {
-        generateTTS(chunks[0]).then(async base64 => {
-           if (!base64) return;
-           if (!audioContextRef.current) audioContextRef.current = new AudioContext();
-           const buf = await decodeAudioData(decodeBase64(base64), audioContextRef.current, 24000);
-           if (buf) audioCacheRef.current.set(chunks[0], buf);
-        }).catch(() => {});
-      }
     } catch (err: any) {
       alert(err.message);
     } finally {
@@ -244,6 +202,7 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) =>
     setShowFeedback(false);
     setFollowUpQuery('');
     setChatHistory([]);
+    // 每题清空一次缓存，防止占用过多内存
     audioCacheRef.current.clear();
     if (currentIndex < questions.length - 1) setCurrentIndex(currentIndex + 1);
     else onFinish(newAnswers);
@@ -278,11 +237,13 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) =>
       </header>
 
       <main className="flex-1 overflow-y-auto pr-1 flex flex-col">
+        {/* 题目卡片 */}
         <div className="bg-white rounded-[32px] p-7 shadow-sm border border-gray-100 mb-6 relative overflow-hidden flex-shrink-0">
           <div className="absolute top-0 left-0 w-1.5 h-full bg-indigo-500 opacity-20"></div>
           <p className="text-lg font-bold leading-relaxed text-gray-800">{questions[currentIndex].question}</p>
         </div>
 
+        {/* 选项列表 */}
         <div className="space-y-3.5 flex-shrink-0 mb-6">
           {questions[currentIndex].options.map((option, idx) => {
             let style = "border-gray-100 bg-white text-gray-700";
@@ -305,6 +266,7 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) =>
 
         {showFeedback && (
           <div className="flex flex-col gap-6 animate-fadeIn pb-8">
+            {/* 标准解析 */}
             <div className="p-6 bg-white rounded-[28px] border border-indigo-50 shadow-sm">
               <div className="flex items-center gap-2 mb-3">
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center text-lg ${selectedOption === questions[currentIndex].answerIndex ? 'bg-green-100' : 'bg-red-100'}`}>
@@ -315,6 +277,7 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) =>
               <p className="text-[14px] text-gray-600 leading-relaxed bg-gray-50 p-4 rounded-2xl font-medium">{questions[currentIndex].explanation}</p>
             </div>
 
+            {/* AI 助教交互区 */}
             <div className="p-6 bg-indigo-50 rounded-[32px] border border-indigo-100 flex flex-col relative overflow-hidden">
               <div className="flex justify-between items-center mb-4">
                 <div className="flex items-center gap-2">
@@ -325,12 +288,13 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) =>
                   <div className="flex items-center gap-1.5 px-3 py-1 bg-white/60 rounded-full border border-indigo-200">
                     <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse"></span>
                     <span className="text-[10px] font-black text-indigo-600 uppercase tracking-tighter">
-                      {isTTSLoading ? "正在合成语音" : "AI 朗读中..."}
+                      {isTTSLoading ? "正在合成完整音频..." : "AI 正在朗读..."}
                     </span>
                   </div>
                 )}
               </div>
 
+              {/* 对话历史 */}
               <div className="flex flex-col gap-3 mb-6 max-h-[400px] overflow-y-auto">
                 {chatHistory.map((msg, idx) => (
                   <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -353,10 +317,19 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel }) =>
                     </div>
                   </div>
                 ))}
-                {isAsking && <div className="flex justify-start"><div className="bg-white p-4 rounded-2xl border border-indigo-100 flex gap-1.5 animate-pulse"><div className="w-1.5 h-1.5 bg-indigo-300 rounded-full"></div><div className="w-1.5 h-1.5 bg-indigo-300 rounded-full"></div><div className="w-1.5 h-1.5 bg-indigo-300 rounded-full"></div></div></div>}
+                {isAsking && (
+                  <div className="flex justify-start">
+                    <div className="bg-white p-4 rounded-2xl border border-indigo-100 flex gap-1.5 animate-pulse">
+                      <div className="w-1.5 h-1.5 bg-indigo-300 rounded-full"></div>
+                      <div className="w-1.5 h-1.5 bg-indigo-300 rounded-full"></div>
+                      <div className="w-1.5 h-1.5 bg-indigo-300 rounded-full"></div>
+                    </div>
+                  </div>
+                )}
                 <div ref={chatEndRef} />
               </div>
 
+              {/* 输入框 */}
               <div className="relative flex items-center gap-2">
                 <div className="relative flex-1">
                   <input
