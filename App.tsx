@@ -15,7 +15,7 @@ const App: React.FC = () => {
   const [loadingMsg, setLoadingMsg] = useState('');
   const [userStats, setUserStats] = useState<UserStats>({ wrongCounts: {}, wrongHistory: [] });
   const [showQuotaModal, setShowQuotaModal] = useState(false);
-  const [errorType, setErrorType] = useState<'RPM' | 'KEY'>('RPM');
+  const [errorType, setErrorType] = useState<'RPM' | 'KEY' | 'MODEL'>('RPM');
   const [reviewInitialTab, setReviewInitialTab] = useState<'summary' | 'details'>('summary');
 
   useEffect(() => {
@@ -43,14 +43,26 @@ const App: React.FC = () => {
     } catch (error: any) {
       console.error("Quiz Generation Error:", error);
       const errorMsg = error.message || "";
+      
       if (errorMsg === "API_KEY_MISSING") {
         setErrorType('KEY');
+        setShowQuotaModal(true);
+      } else if (errorMsg === "MODEL_NOT_FOUND") {
+        setErrorType('MODEL');
         setShowQuotaModal(true);
       } else if (errorMsg === "QUOTA_EXCEEDED" || errorMsg.includes("429")) {
         setErrorType('RPM');
         setShowQuotaModal(true);
       } else {
-        alert(`生成失败: ${errorMsg}`);
+        // 尝试解析可能的 JSON 错误
+        let readableError = errorMsg;
+        try {
+          if (errorMsg.startsWith('{')) {
+            const parsed = JSON.parse(errorMsg);
+            readableError = parsed.error?.message || errorMsg;
+          }
+        } catch(e) {}
+        alert(`生成失败: ${readableError}`);
       }
       setView(AppState.HOME);
     }
@@ -151,29 +163,40 @@ const App: React.FC = () => {
       {showQuotaModal && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm p-6 animate-fadeIn">
           <div className="bg-white w-full max-w-xs rounded-[32px] p-8 shadow-2xl text-center">
-            <div className="text-4xl mb-4">{errorType === 'KEY' ? '🔑' : '⏳'}</div>
+            <div className="text-4xl mb-4">
+              {errorType === 'KEY' ? '🔑' : errorType === 'MODEL' ? '🚫' : '⏳'}
+            </div>
             <h3 className="text-xl font-black text-gray-900 mb-2">
-              {errorType === 'KEY' ? '未找到 API 密钥' : '老师正在休息'}
+              {errorType === 'KEY' ? '未找到 API 密钥' : errorType === 'MODEL' ? '系统升级中' : '老师正在休息'}
             </h3>
             
             <div className="text-left space-y-3 mb-6">
-              {errorType === 'KEY' ? (
+              {errorType === 'KEY' && (
                 <div className="p-3 bg-red-50 rounded-xl border border-red-100">
                    <p className="text-[11px] font-bold text-red-700 mb-1">配置错误</p>
-                   <p className="text-[10px] text-red-600/70 leading-relaxed">Vercel 的 API_KEY 变量似乎没有生效。请确保你在 Vercel 后台添加了变量并点击了 **Redeploy**。</p>
+                   <p className="text-[10px] text-red-600/70 leading-relaxed">Vercel 的 API_KEY 变量未生效。请确保已添加变量并点击了 **Redeploy**。</p>
                 </div>
-              ) : (
+              )}
+
+              {errorType === 'MODEL' && (
+                <div className="p-3 bg-orange-50 rounded-xl border border-orange-100">
+                   <p className="text-[11px] font-bold text-orange-700 mb-1">模型路径错误</p>
+                   <p className="text-[10px] text-orange-600/70 leading-relaxed">AI 模型名称在当前区域不可用。已尝试自动修复，请重新点击开始。</p>
+                </div>
+              )}
+
+              {errorType === 'RPM' && (
                 <div className="p-3 bg-indigo-50 rounded-xl border border-indigo-100">
                    <p className="text-[11px] font-black text-indigo-700 mb-1">频率限制 (RPM)</p>
-                   <p className="text-[10px] text-indigo-600/70 leading-relaxed">免费版 AI 每分钟只能回答约 15 次。刚才请求太密集了，请静候 30 秒再点击开始。</p>
+                   <p className="text-[10px] text-indigo-600/70 leading-relaxed">免费版 AI 每分钟限 15 次。刚才请求太密集了，请静候 30 秒再点击开始。</p>
                 </div>
               )}
               
               <div className="p-3 bg-amber-50 rounded-xl border border-amber-100">
                  <p className="text-[11px] font-bold text-amber-700 mb-1">解决办法</p>
                  <p className="text-[10px] text-amber-600/70 leading-relaxed">
-                   1. 检查新 Key 是否已在 Vercel 生效。<br/>
-                   2. 减少一次生成的题量（建议选 5 或 10 题）。
+                   1. 减少生成的题量（建议 5-10 题）。<br/>
+                   2. 检查手机代理（VPN）是否开启且稳定。
                  </p>
               </div>
             </div>
