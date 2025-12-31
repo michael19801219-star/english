@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { Question, Difficulty, ChatMessage } from "../types";
 
 const getAI = () => {
@@ -73,7 +73,6 @@ export const askFollowUpQuestion = async (
 ): Promise<string> => {
   const ai = getAI();
   
-  // 构建带有历史上下文的 prompt
   let conversationContext = "";
   if (history.length > 0) {
     conversationContext = "前面的对话内容：\n" + history.map(m => `${m.role === 'user' ? '学生' : '老师'}: ${m.content}`).join('\n') + "\n";
@@ -90,7 +89,6 @@ export const askFollowUpQuestion = async (
     学生的当前新疑问是：${userQuery}
 
     请作为资深英语老师，针对该疑问提供通俗易懂、逻辑清晰的解答。
-    如果是针对之前的回答进行的追问，请保持逻辑连贯。
     字数要求：150字以内。
     语言：中文。
   `;
@@ -104,5 +102,30 @@ export const askFollowUpQuestion = async (
   } catch (error: any) {
     console.error("AI Tutor Error:", error);
     throw new Error("提问失败，请检查网络连接。");
+  }
+};
+
+export const generateTTS = async (text: string): Promise<string> => {
+  const ai = getAI();
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash-preview-tts",
+      contents: [{ parts: [{ text: `请用温和清晰的中文朗读：${text}` }] }],
+      config: {
+        responseModalities: [Modality.AUDIO],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: 'Kore' } // 'Kore' 是非常适合教学的清脆女声
+          }
+        }
+      }
+    });
+
+    const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    if (!base64Audio) throw new Error("TTS_FAILED");
+    return base64Audio;
+  } catch (error) {
+    console.error("TTS Error:", error);
+    throw error;
   }
 };
