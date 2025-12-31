@@ -9,28 +9,19 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
     return await fn();
   } catch (error: any) {
     const errorStr = JSON.stringify(error).toLowerCase();
-    
-    if (errorStr.includes('404') || errorStr.includes('not_found')) {
-      throw new Error("MODEL_NOT_FOUND");
-    }
-
-    const isQuotaError = errorStr.includes('429') || 
-                        errorStr.includes('quota') || 
-                        errorStr.includes('exhausted') ||
-                        (error.message && error.message.includes('429'));
+    const isQuotaError = errorStr.includes('429') || errorStr.includes('quota');
 
     if (isQuotaError && retries > 0) {
-      const waitTime = (4 - retries) * 4000 + Math.random() * 2000;
-      await delay(waitTime);
+      await delay(2000 * (4 - retries));
       return withRetry(fn, retries - 1);
     }
-    
-    if (isQuotaError) throw new Error("QUOTA_EXCEEDED");
     throw error;
   }
 }
 
-const TARGET_MODEL = 'gemini-3-pro-preview';
+// Select Gemini 3 models based on task type
+const FLASH_MODEL = 'gemini-3-flash-preview';
+const PRO_MODEL = 'gemini-3-pro-preview';
 
 const SCHEMA = {
   type: Type.ARRAY,
@@ -55,27 +46,36 @@ export const generateGrammarQuestions = async (
   difficulty: Difficulty
 ): Promise<Question[]> => {
   return withRetry(async () => {
-    // 直接使用 process.env.API_KEY，系统会自动注入
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-    const pointsDesc = targetPoints.length > 0 ? `专项考点：${targetPoints.join('、')}。` : "涵盖高中核心考点。";
+    // Always use named parameter for apiKey and direct process.env.API_KEY
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const pointsDesc = targetPoints.length > 0 ? `考察考点：${targetPoints.join('、')}。` : "涵盖高考核心语法考点。";
     
-    const prompt = `你是高考英语专家。请生成 ${count} 道单项填空题，难度：${difficulty}。${pointsDesc} 
+    const prompt = `你是一位高考英语命题专家。请生成 ${count} 道单项填空练习题。
+    难度：${difficulty}。
+    考点：${pointsDesc}
+    
     要求：
-    1. 符合高考命题逻辑。
-    2. 请务必使用中文提供详尽的解析且含翻译。
-    3. 特别注意：确保正确答案（answerIndex）在 0-3 之间分布均衡。
-    返回标准 JSON 数组。`;
+    1. 题目情景要贴近生活，逻辑性强。
+    2. 提供详尽的中文解析。
+    3. 选项 A, B, C, D 必须是 4 个。
+    4. 严格按照 JSON 数组格式返回，不要包含任何 Markdown 说明文字。`;
 
     const response = await ai.models.generateContent({
-      model: TARGET_MODEL,
+      model: FLASH_MODEL,
       contents: prompt,
       config: {
         responseMimeType: "application/json",
         responseSchema: SCHEMA,
-        temperature: 0.8
+        temperature: 0.7
       }
     });
-    return JSON.parse(response.text || "[]");
+    
+    // Access response text directly from .text property
+    const data = JSON.parse(response.text || "[]");
+    return data.map((q: any) => ({
+      ...q,
+      id: q.id || `q_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    }));
   });
 };
 
@@ -85,14 +85,18 @@ export const askFollowUpQuestion = async (
   userQuery: string
 ): Promise<string> => {
   return withRetry(async () => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-    const contextPrompt = `针对高考英语题：${questionContext.question}\n正确答案：${questionContext.options[questionContext.answerIndex]}\n学生疑问：${userQuery}\n请作为名师提供简洁易懂的中文答疑。`;
+    // Always use named parameter for apiKey and direct process.env.API_KEY
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const contextPrompt = `上下文：题目是 "${questionContext.question}"，正确选项是 "${questionContext.options[questionContext.answerIndex]}"。
+    学生问："${userQuery}"
+    请用通俗易懂的方式解答，语气鼓励且专业。`;
     const response = await ai.models.generateContent({
-      model: TARGET_MODEL,
+      model: PRO_MODEL, // Use Pro model for complex educational Q&A
       contents: contextPrompt,
-      config: { temperature: 0.5 }
+      config: { temperature: 0.6 }
     });
-    return response.text || "老师正在组织语言...";
+    // Access response text directly from .text property
+    return response.text || "老师正在组织语言，请稍后再试。";
   });
 };
 
@@ -101,13 +105,14 @@ export const getGrammarDeepDive = async (
   wrongQuestions: WrongQuestion[]
 ): Promise<{ lecture: string; mistakeAnalysis: string; tips: string[] }> => {
   return withRetry(async () => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-    const prompt = `深入讲解高中英语考点：“${pointName}”。参考错题：${wrongQuestions.slice(0, 3).map(q => q.question).join('|')}。
-    要求：全部使用中文。包含核心讲义、错因分析和3条避坑指南。
-    返回标准 JSON 对象。`;
+    // Always use named parameter for apiKey and direct process.env.API_KEY
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const prompt = `请深度讲解高中语法考点：“${pointName}”。
+    基于以下错题提供针对性建议：${wrongQuestions.slice(0, 2).map(q => q.question).join('|')}。
+    要求返回 JSON 对象，包含讲义(lecture)、错因分析(mistakeAnalysis)和避坑技巧(tips)。`;
     
     const response = await ai.models.generateContent({
-      model: TARGET_MODEL,
+      model: PRO_MODEL, // Use Pro model for advanced reasoning and lecture generation
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -122,6 +127,7 @@ export const getGrammarDeepDive = async (
         }
       }
     });
+    // Access response text directly from .text property
     return JSON.parse(response.text || "{}");
   });
 };
