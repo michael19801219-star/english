@@ -128,45 +128,50 @@ const ReviewView: React.FC<ReviewViewProps> = ({ history, savedHistory, onBack, 
           </div>
         ) : activeTab === 'summary' ? (
           <div className="space-y-4">
-            {sortedPoints.map(([point, data]) => (
-              <div key={point} className="bg-white rounded-[24px] border border-gray-100 overflow-hidden shadow-sm">
-                <button onClick={() => handleTogglePoint(point)} className="w-full p-6 flex justify-between items-center text-left">
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center font-black">{data.count}</div>
-                    <span className="font-bold text-gray-900">{point}</span>
-                  </div>
-                  <svg className={`w-5 h-5 text-gray-300 transition-transform ${selectedPoint === point ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"/></svg>
-                </button>
-                {selectedPoint === point && (
-                  <div className="px-6 pb-6 border-t border-gray-50 animate-fadeIn pt-4 space-y-4">
-                    {loadingPoints[point] ? (
-                      <div className="py-8 flex justify-center"><div className="w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>
-                    ) : deepDives[point] ? (
-                      <>
-                        <div className="p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100/50">
-                          <h6 className="text-[10px] font-black text-indigo-700 uppercase mb-2">考点讲解</h6>
-                          <p className="text-[13px] text-indigo-900 leading-relaxed">{deepDives[point].lecture}</p>
-                        </div>
-                        <div className="p-4 bg-red-50/50 rounded-2xl border border-red-100/50">
-                          <h6 className="text-[10px] font-black text-red-700 uppercase mb-2">典型错因</h6>
-                          <p className="text-[13px] text-red-900 leading-relaxed italic">{deepDives[point].mistakeAnalysis}</p>
-                        </div>
-                        {/* Fix missing tips rendering using .map() on deepDives[point].tips */}
-                        <div className="p-4 bg-green-50/50 rounded-2xl border border-green-100/50">
-                          <h6 className="text-[10px] font-black text-green-700 uppercase mb-2">避坑指南</h6>
-                          <ul className="list-disc list-inside space-y-1">
-                            {deepDives[point].tips.map((tip, i) => (
-                              <li key={i} className="text-[13px] text-green-900 leading-relaxed">{tip}</li>
-                            ))}
-                          </ul>
-                        </div>
-                        <button onClick={() => onStartQuiz(point)} className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black text-sm active:scale-95 shadow-lg shadow-indigo-100">开始专项练习</button>
-                      </>
-                    ) : null}
-                  </div>
-                )}
-              </div>
-            ))}
+            {sortedPoints.map(([point, data]) => {
+              // Extract diveData to help TypeScript narrowing and avoid index access type loss in JSX
+              // Explicitly type diveData to avoid inference issues with Record and complex ternary
+              const diveData: DeepDiveData | undefined = deepDives[point];
+              return (
+                <div key={point} className="bg-white rounded-[24px] border border-gray-100 overflow-hidden shadow-sm">
+                  <button onClick={() => handleTogglePoint(point)} className="w-full p-6 flex justify-between items-center text-left">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center font-black">{data.count}</div>
+                      <span className="font-bold text-gray-900">{point}</span>
+                    </div>
+                    <svg className={`w-5 h-5 text-gray-300 transition-transform ${selectedPoint === point ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"/></svg>
+                  </button>
+                  {selectedPoint === point && (
+                    <div className="px-6 pb-6 border-t border-gray-50 animate-fadeIn pt-4 space-y-4">
+                      {loadingPoints[point] ? (
+                        <div className="py-8 flex justify-center"><div className="w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>
+                      ) : diveData ? (
+                        <>
+                          <div className="p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100/50">
+                            <h6 className="text-[10px] font-black text-indigo-700 uppercase mb-2">考点讲解</h6>
+                            <p className="text-[13px] text-indigo-900 leading-relaxed">{diveData.lecture}</p>
+                          </div>
+                          <div className="p-4 bg-red-50/50 rounded-2xl border border-red-100/50">
+                            <h6 className="text-[10px] font-black text-red-700 uppercase mb-2">典型错因</h6>
+                            <p className="text-[13px] text-red-900 leading-relaxed italic">{diveData.mistakeAnalysis}</p>
+                          </div>
+                          <div className="p-4 bg-green-50/50 rounded-2xl border border-green-100/50">
+                            <h6 className="text-[10px] font-black text-green-700 uppercase mb-2">避坑指南</h6>
+                            <ul className="list-disc list-inside space-y-1">
+                              {/* Use explicit cast to string[] to resolve 'unknown' type error on tips.map */}
+                              {(diveData.tips as string[]).map((tip, i) => (
+                                <li key={i} className="text-[13px] text-green-900 leading-relaxed">{tip}</li>
+                              ))}
+                            </ul>
+                          </div>
+                          <button onClick={() => onStartQuiz(point)} className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black text-sm active:scale-95 shadow-lg shadow-indigo-100">开始专项练习</button>
+                        </>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         ) : (
           <div className="space-y-8">
