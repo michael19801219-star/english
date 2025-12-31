@@ -137,13 +137,19 @@ const App: React.FC = () => {
     setView(AppState.LOADING);
     setLoadingMsg(`AI 正在生成专项练习题...`);
     try {
+      // 如果生成失败，尝试更小的题量
       const newQuestions = await generateGrammarQuestions(count, points, difficulty);
       if (!newQuestions || newQuestions.length === 0) throw new Error("EMPTY_DATA");
       setQuestions(newQuestions);
       setView(AppState.QUIZ);
     } catch (error: any) {
       console.error("Quiz Generation Error:", error);
-      alert("AI 生成试题遇到点小状况，请稍后重试。");
+      const isQuota = error.message?.includes('429') || JSON.stringify(error).includes('429');
+      if (isQuota) {
+        alert("操作太快啦，AI 需要休息一下，请 30 秒后再试。");
+      } else {
+        alert("生成试题失败，可能是网络波动或模型超时。建议尝试减少题目数量。");
+      }
       setView(AppState.HOME);
     }
   };
