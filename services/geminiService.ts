@@ -2,10 +2,15 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Question, Difficulty, ChatMessage, WrongQuestion } from "../types";
 
-// 兼容多种环境变量写法，确保 Vercel 注入成功
+// 获取 API Key 的稳健方法
 const getApiKey = () => {
-  const key = process.env.API_KEY;
-  if (!key || key === "undefined" || key === "") return null;
+  // 检查 Vite 注入的多种可能性
+  const key = process.env.API_KEY || (window as any).process?.env?.API_KEY;
+  
+  if (!key || key === "undefined" || key === "" || key.includes("process.env")) {
+    console.error("检测到 API_KEY 缺失或未正确注入 Vercel 环境变量");
+    return null;
+  }
   return key;
 };
 
@@ -22,9 +27,9 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
                         (error.message && error.message.includes('429'));
 
     if (isQuotaError && retries > 0) {
-      // 阶梯式重试：3s -> 6s -> 12s
-      const waitTime = (4 - retries) * 3000;
-      console.log(`检测到频率限制，${waitTime/1000}秒后进行第 ${4-retries} 次重试...`);
+      // 增加重试间隔，并加入随机抖动（防止同步重试再次冲突）
+      const waitTime = (4 - retries) * 4000 + Math.random() * 2000;
+      console.warn(`[API] 频率受限，${Math.round(waitTime/1000)}s 后自动重试...`);
       await delay(waitTime);
       return withRetry(fn, retries - 1);
     }
@@ -34,6 +39,7 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
   }
 }
 
+// 高考英语语法题 JSON 结构定义
 const SCHEMA = {
   type: Type.ARRAY,
   items: {
@@ -61,15 +67,16 @@ export const generateGrammarQuestions = async (
 
   return withRetry(async () => {
     const ai = new GoogleGenAI({ apiKey });
-    const pointsDesc = targetPoints.length > 0 ? `专项考点：${targetPoints.join('、')}。` : "全考点。";
-    const prompt = `生成 ${count} 道高考英语语法单选题，难度：${difficulty}。${pointsDesc} 解析需包含翻译。返回纯 JSON。`;
+    const pointsDesc = targetPoints.length > 0 ? `专项考点：${targetPoints.join('、')}。` : "涵盖高中核心考点。";
+    const prompt = `你是高考英语专家。请生成 ${count} 道单项填空题，难度：${difficulty}。${pointsDesc} 要求：符合高考命题逻辑，解析详尽且含翻译。返回标准 JSON 数组。`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-2.5-flash-lite-latest",
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        responseSchema: SCHEMA
+        responseSchema: SCHEMA,
+        temperature: 0.7 // 增加稳定性
       }
     });
     return JSON.parse(response.text || "[]");
@@ -86,10 +93,11 @@ export const askFollowUpQuestion = async (
 
   return withRetry(async () => {
     const ai = new GoogleGenAI({ apiKey });
-    const contextPrompt = `针对题目：${questionContext.question}，回答学生疑问：${userQuery}。简洁专业。`;
+    const contextPrompt = `针对高考英语题：${questionContext.question}\n正确答案：${questionContext.options[questionContext.answerIndex]}\n学生疑问：${userQuery}\n请作为名师提供简洁、易懂的回答。`;
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: contextPrompt
+      model: "gemini-2.5-flash-lite-latest",
+      contents: contextPrompt,
+      config: { temperature: 0.5 }
     });
     return response.text || "老师正在组织语言...";
   });
@@ -104,10 +112,10 @@ export const getGrammarDeepDive = async (
 
   return withRetry(async () => {
     const ai = new GoogleGenAI({ apiKey });
-    const prompt = `分析考点“${pointName}”。错题参考：${wrongQuestions.map(q => q.question).join('|')}。返回核心逻辑、错因、3条Tips的JSON。`;
+    const prompt = `深入讲解考点：“${pointName}”。参考学生之前的错题：${wrongQuestions.slice(0, 3).map(q => q.question).join('|')}。返回包含 lecture(核心逻辑), mistakeAnalysis(针对性错因), tips(3条避坑指南) 的 JSON。`;
     
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-2.5-flash-lite-latest",
       contents: prompt,
       config: {
         responseMimeType: "application/json",

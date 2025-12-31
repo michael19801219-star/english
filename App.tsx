@@ -15,6 +15,7 @@ const App: React.FC = () => {
   const [loadingMsg, setLoadingMsg] = useState('');
   const [userStats, setUserStats] = useState<UserStats>({ wrongCounts: {}, wrongHistory: [] });
   const [showQuotaModal, setShowQuotaModal] = useState(false);
+  const [errorType, setErrorType] = useState<'RPM' | 'KEY'>('RPM');
   const [reviewInitialTab, setReviewInitialTab] = useState<'summary' | 'details'>('summary');
 
   useEffect(() => {
@@ -42,7 +43,11 @@ const App: React.FC = () => {
     } catch (error: any) {
       console.error("Quiz Generation Error:", error);
       const errorMsg = error.message || "";
-      if (errorMsg === "QUOTA_EXCEEDED" || errorMsg.includes("429") || errorMsg.includes("quota")) {
+      if (errorMsg === "API_KEY_MISSING") {
+        setErrorType('KEY');
+        setShowQuotaModal(true);
+      } else if (errorMsg === "QUOTA_EXCEEDED" || errorMsg.includes("429")) {
+        setErrorType('RPM');
         setShowQuotaModal(true);
       } else {
         alert(`生成失败: ${errorMsg}`);
@@ -124,7 +129,10 @@ const App: React.FC = () => {
           questions={questions} 
           onFinish={finishQuiz} 
           onCancel={handleCancelQuiz} 
-          onQuotaError={() => setShowQuotaModal(true)} 
+          onQuotaError={() => {
+            setErrorType('RPM');
+            setShowQuotaModal(true);
+          }} 
         />
       )}
       {view === AppState.RESULT && results && (
@@ -143,18 +151,33 @@ const App: React.FC = () => {
       {showQuotaModal && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm p-6 animate-fadeIn">
           <div className="bg-white w-full max-w-xs rounded-[32px] p-8 shadow-2xl text-center">
-            <div className="text-4xl mb-4">⏳</div>
-            <h3 className="text-xl font-black text-gray-900 mb-2">老师正在休息</h3>
+            <div className="text-4xl mb-4">{errorType === 'KEY' ? '🔑' : '⏳'}</div>
+            <h3 className="text-xl font-black text-gray-900 mb-2">
+              {errorType === 'KEY' ? '未找到 API 密钥' : '老师正在休息'}
+            </h3>
+            
             <div className="text-left space-y-3 mb-6">
-              <div className="p-3 bg-indigo-50 rounded-xl border border-indigo-100">
-                 <p className="text-[11px] font-bold text-indigo-700 mb-1">频率限制 (RPM)</p>
-                 <p className="text-[10px] text-indigo-600/70 leading-relaxed">AI 每一分钟只能回答约 15 次问题。刚才你可能点击太快了，请静候 30 秒再试。</p>
-              </div>
+              {errorType === 'KEY' ? (
+                <div className="p-3 bg-red-50 rounded-xl border border-red-100">
+                   <p className="text-[11px] font-bold text-red-700 mb-1">配置错误</p>
+                   <p className="text-[10px] text-red-600/70 leading-relaxed">Vercel 的 API_KEY 变量似乎没有生效。请确保你在 Vercel 后台添加了变量并点击了 **Redeploy**。</p>
+                </div>
+              ) : (
+                <div className="p-3 bg-indigo-50 rounded-xl border border-indigo-100">
+                   <p className="text-[11px] font-black text-indigo-700 mb-1">频率限制 (RPM)</p>
+                   <p className="text-[10px] text-indigo-600/70 leading-relaxed">免费版 AI 每分钟只能回答约 15 次。刚才请求太密集了，请静候 30 秒再点击开始。</p>
+                </div>
+              )}
+              
               <div className="p-3 bg-amber-50 rounded-xl border border-amber-100">
-                 <p className="text-[11px] font-bold text-amber-700 mb-1">小贴士</p>
-                 <p className="text-[10px] text-amber-600/70 leading-relaxed">如果更换了新 Key 仍然报错，请检查你是否在项目设置中正确保存并更新了 API_KEY 变量。</p>
+                 <p className="text-[11px] font-bold text-amber-700 mb-1">解决办法</p>
+                 <p className="text-[10px] text-amber-600/70 leading-relaxed">
+                   1. 检查新 Key 是否已在 Vercel 生效。<br/>
+                   2. 减少一次生成的题量（建议选 5 或 10 题）。
+                 </p>
               </div>
             </div>
+
             <button 
               onClick={() => setShowQuotaModal(false)}
               className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black shadow-lg shadow-indigo-100 active:scale-95 transition-transform"
