@@ -38,6 +38,10 @@ const App: React.FC = () => {
     localStorage.setItem('gaokao_stats_v2', JSON.stringify(updatedStats));
   };
 
+  const handleUpdateStats = (newStats: UserStats) => {
+    saveStatsToStorage(newStats);
+  };
+
   const handleAnswerSubmitted = (question: Question, userAnswerIndex: number) => {
     if (userAnswerIndex !== question.answerIndex) {
       const newStats = { ...userStats };
@@ -49,7 +53,7 @@ const App: React.FC = () => {
         timestamp: Date.now()
       };
       const filteredHistory = newStats.wrongHistory.filter(q => q.question !== question.question);
-      newStats.wrongHistory = [wrongEntry, ...filteredHistory].slice(0, 100);
+      newStats.wrongHistory = [wrongEntry, ...filteredHistory].slice(0, 200);
       saveStatsToStorage(newStats);
     }
   };
@@ -60,8 +64,28 @@ const App: React.FC = () => {
     if (isSaved) {
       newStats.savedHistory = newStats.savedHistory.filter(q => q.question !== question.question);
     } else {
-      newStats.savedHistory = [{ ...question, userAnswerIndex, timestamp: Date.now() }, ...newStats.savedHistory].slice(0, 50);
+      newStats.savedHistory = [{ ...question, userAnswerIndex, timestamp: Date.now() }, ...newStats.savedHistory].slice(0, 100);
     }
+    saveStatsToStorage(newStats);
+  };
+
+  const handleDeleteWrong = (questionText: string) => {
+    const newStats = { ...userStats };
+    const deletedItem = newStats.wrongHistory.find(q => q.question === questionText);
+    if (deletedItem) {
+      const point = deletedItem.grammarPoint;
+      if (newStats.wrongCounts[point] > 0) {
+        newStats.wrongCounts[point]--;
+        if (newStats.wrongCounts[point] === 0) delete newStats.wrongCounts[point];
+      }
+    }
+    newStats.wrongHistory = newStats.wrongHistory.filter(q => q.question !== questionText);
+    saveStatsToStorage(newStats);
+  };
+
+  const handleDeleteSaved = (questionText: string) => {
+    const newStats = { ...userStats };
+    newStats.savedHistory = newStats.savedHistory.filter(q => q.question !== questionText);
     saveStatsToStorage(newStats);
   };
 
@@ -125,9 +149,19 @@ const App: React.FC = () => {
   };
 
   const clearHistory = () => {
-    if (confirm('确定要清空错题本吗？')) {
-      const reset = { wrongCounts: {}, wrongHistory: [], savedHistory: [] };
-      saveStatsToStorage(reset);
+    if (confirm('确定要清空当前列表的所有记录吗？')) {
+      const newStats = { ...userStats };
+      if (reviewInitialTab === 'details') {
+        newStats.wrongHistory = [];
+        newStats.wrongCounts = {};
+      } else if (reviewInitialTab === 'saved') {
+        newStats.savedHistory = [];
+      } else {
+        newStats.wrongHistory = [];
+        newStats.wrongCounts = {};
+        newStats.savedHistory = [];
+      }
+      saveStatsToStorage(newStats);
     }
   };
 
@@ -147,7 +181,8 @@ const App: React.FC = () => {
         <HomeView 
           onStart={startQuiz} 
           stats={userStats} 
-          onGoToReview={handleGoToReview} 
+          onGoToReview={handleGoToReview}
+          onUpdateStats={handleUpdateStats}
         />
       )}
       {view === AppState.LOADING && <LoadingView message={loadingMsg} onCancel={() => setView(AppState.HOME)} />}
@@ -174,6 +209,8 @@ const App: React.FC = () => {
           savedHistory={userStats.savedHistory}
           onBack={() => setView(AppState.HOME)} 
           onClear={clearHistory} 
+          onDeleteWrong={handleDeleteWrong}
+          onDeleteSaved={handleDeleteSaved}
           onStartQuiz={(point) => startQuiz(10, '中等', [point])}
           initialTab={reviewInitialTab}
         />

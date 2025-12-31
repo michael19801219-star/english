@@ -35,7 +35,9 @@ export interface WrongQuestion extends Question {
 export interface UserStats {
   wrongCounts: Record<string, number>;
   wrongHistory: WrongQuestion[];
-  savedHistory: WrongQuestion[]; // 新增：用户主动收藏的题目
+  savedHistory: WrongQuestion[];
+  syncId?: string;       // 新增：云同步唯一识别码
+  lastSyncTime?: number; // 新增：上次同步时间戳
 }
 
 export interface ChatMessage {

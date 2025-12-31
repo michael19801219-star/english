@@ -2,18 +2,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Question, Difficulty, ChatMessage, WrongQuestion } from "../types";
 
-// 获取 API Key 的稳健方法
-const getApiKey = () => {
-  // 优先级：VITE_API_KEY > API_KEY > window.process
-  const key = process.env.API_KEY || (window as any).process?.env?.API_KEY;
-  
-  if (!key || key === "undefined" || key === "" || key.includes("process.env")) {
-    console.error("检测到 API_KEY 缺失或未正确注入 Vercel 环境变量");
-    return null;
-  }
-  return key;
-};
-
+// Removed getApiKey as process.env.API_KEY should be used directly per guidelines
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function withRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
@@ -44,8 +33,8 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
   }
 }
 
-// 确保使用稳定的模型名称
-const TARGET_MODEL = 'gemini-flash-lite-latest';
+// Updated to gemini-3-pro-preview for complex reasoning tasks (High School Exam Questions)
+const TARGET_MODEL = 'gemini-3-pro-preview';
 
 // 高考英语语法题 JSON 结构定义
 const SCHEMA = {
@@ -70,11 +59,9 @@ export const generateGrammarQuestions = async (
   targetPoints: string[], 
   difficulty: Difficulty
 ): Promise<Question[]> => {
-  const apiKey = getApiKey();
-  if (!apiKey) throw new Error("API_KEY_MISSING");
-
   return withRetry(async () => {
-    const ai = new GoogleGenAI({ apiKey });
+    // Initializing with process.env.API_KEY directly as required by guidelines
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
     const pointsDesc = targetPoints.length > 0 ? `专项考点：${targetPoints.join('、')}。` : "涵盖高中核心考点。";
     
     // 明确要求中文解析，并增加答案均衡性的指令
@@ -103,11 +90,8 @@ export const askFollowUpQuestion = async (
   history: ChatMessage[],
   userQuery: string
 ): Promise<string> => {
-  const apiKey = getApiKey();
-  if (!apiKey) throw new Error("API_KEY_MISSING");
-
   return withRetry(async () => {
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
     // 明确要求中文答疑
     const contextPrompt = `针对高考英语题：${questionContext.question}\n正确答案：${questionContext.options[questionContext.answerIndex]}\n学生疑问：${userQuery}\n请作为名师提供简洁、易懂的中文回答。不要使用英文回复（除非是举例）。`;
     const response = await ai.models.generateContent({
@@ -123,11 +107,8 @@ export const getGrammarDeepDive = async (
   pointName: string,
   wrongQuestions: WrongQuestion[]
 ): Promise<{ lecture: string; mistakeAnalysis: string; tips: string[] }> => {
-  const apiKey = getApiKey();
-  if (!apiKey) throw new Error("API_KEY_MISSING");
-
   return withRetry(async () => {
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
     // 重点：要求 JSON 内容必须是中文
     const prompt = `深入讲解考点：“${pointName}”。参考学生之前的错题：${wrongQuestions.slice(0, 3).map(q => q.question).join('|')}。
     要求：
