@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { AppState, Question, QuizResults, UserStats, Difficulty, WrongQuestion } from './types';
 import { generateGrammarQuestions } from './services/geminiService';
 import HomeView from './components/HomeView';
@@ -25,8 +25,8 @@ const App: React.FC = () => {
     return { wrongCounts: {}, wrongHistory: [], savedHistory: [] };
   });
   const [reviewInitialTab, setReviewInitialTab] = useState<'summary' | 'details' | 'saved'>('summary');
+  const [isProcessing, setIsProcessing] = useState(false);
   
-  // 用于全局“清空”动作的自定义确认状态
   const [clearConfirm, setClearConfirm] = useState<{ isOpen: boolean; type: 'details' | 'saved' | null }>({ isOpen: false, type: null });
 
   useEffect(() => {
@@ -47,21 +47,10 @@ const App: React.FC = () => {
       setUserStats(prev => {
         const point = question.grammarPoint;
         const newCounts = { ...prev.wrongCounts, [point]: (prev.wrongCounts[point] || 0) + 1 };
-        
         const exists = prev.wrongHistory.some(q => q.question === question.question);
         if (exists) return prev;
-
-        const wrongEntry: WrongQuestion = {
-          ...question,
-          userAnswerIndex,
-          timestamp: Date.now()
-        };
-        
-        return {
-          ...prev,
-          wrongCounts: newCounts,
-          wrongHistory: [wrongEntry, ...prev.wrongHistory].slice(0, 200)
-        };
+        const wrongEntry: WrongQuestion = { ...question, userAnswerIndex, timestamp: Date.now() };
+        return { ...prev, wrongCounts: newCounts, wrongHistory: [wrongEntry, ...prev.wrongHistory].slice(0, 200) };
       });
     }
   };
@@ -70,20 +59,10 @@ const App: React.FC = () => {
     setUserStats(prev => {
       const isAlreadySaved = prev.savedHistory.some(q => q.question === question.question);
       if (isAlreadySaved) {
-        return {
-          ...prev,
-          savedHistory: prev.savedHistory.filter(q => q.question !== question.question)
-        };
+        return { ...prev, savedHistory: prev.savedHistory.filter(q => q.question !== question.question) };
       } else {
-        const saveEntry: WrongQuestion = {
-          ...question,
-          userAnswerIndex,
-          timestamp: Date.now()
-        };
-        return {
-          ...prev,
-          savedHistory: [saveEntry, ...prev.savedHistory].slice(0, 100)
-        };
+        const saveEntry: WrongQuestion = { ...question, userAnswerIndex, timestamp: Date.now() };
+        return { ...prev, savedHistory: [saveEntry, ...prev.savedHistory].slice(0, 100) };
       }
     });
   };
@@ -92,85 +71,66 @@ const App: React.FC = () => {
     setUserStats(prev => {
       const itemToDelete = prev.wrongHistory.find(q => q.timestamp === timestamp);
       if (!itemToDelete) return prev;
-
       const point = itemToDelete.grammarPoint;
       const newCounts = { ...prev.wrongCounts };
       if (newCounts[point] > 0) {
         newCounts[point]--;
         if (newCounts[point] === 0) delete newCounts[point];
       }
-
-      return {
-        ...prev,
-        wrongHistory: prev.wrongHistory.filter(q => q.timestamp !== timestamp),
-        wrongCounts: newCounts
-      };
+      return { ...prev, wrongHistory: prev.wrongHistory.filter(q => q.timestamp !== timestamp), wrongCounts: newCounts };
     });
   };
 
   const handleDeleteSaved = (timestamp: number) => {
-    setUserStats(prev => ({
-      ...prev,
-      savedHistory: prev.savedHistory.filter(q => q.timestamp !== timestamp)
-    }));
+    setUserStats(prev => ({ ...prev, savedHistory: prev.savedHistory.filter(q => q.timestamp !== timestamp) }));
   };
 
-  // 请求清空
   const requestClearHistory = (type: 'details' | 'saved') => {
     setClearConfirm({ isOpen: true, type });
   };
 
-  // 执行清空
   const executeClearHistory = () => {
     const type = clearConfirm.type;
     setUserStats(prev => {
-      if (type === 'details') {
-        return { ...prev, wrongHistory: [], wrongCounts: {} };
-      } else {
-        return { ...prev, savedHistory: [] };
-      }
+      if (type === 'details') return { ...prev, wrongHistory: [], wrongCounts: {} };
+      else return { ...prev, savedHistory: [] };
     });
     setClearConfirm({ isOpen: false, type: null });
   };
 
-  const startQuiz = async (count: number, difficulty: Difficulty, points: string[]) => {
+  const startQuiz = useCallback(async (count: number, difficulty: Difficulty, points: string[]) => {
+    if (isProcessing) return;
+    setIsProcessing(true);
     setView(AppState.LOADING);
-    setLoadingMsg(`AI 正在生成专项练习题...`);
+    setLoadingMsg(`AI 正在定制题目，由于访问量较大可能需要排队，请稍等...`);
+    
     try {
-      // 如果生成失败，尝试更小的题量
       const newQuestions = await generateGrammarQuestions(count, points, difficulty);
       if (!newQuestions || newQuestions.length === 0) throw new Error("EMPTY_DATA");
       setQuestions(newQuestions);
       setView(AppState.QUIZ);
     } catch (error: any) {
       console.error("Quiz Generation Error:", error);
-      const isQuota = error.message?.includes('429') || JSON.stringify(error).includes('429');
-      if (isQuota) {
-        alert("操作太快啦，AI 需要休息一下，请 30 秒后再试。");
+      const errStr = JSON.stringify(error).toLowerCase();
+      if (errStr.includes('429') || errStr.includes('quota')) {
+        alert("AI 暂时忙碌（频率限制），请等待 30-60 秒后重试。");
       } else {
-        alert("生成试题失败，可能是网络波动或模型超时。建议尝试减少题目数量。");
+        alert("出题遇到小状况，请检查网络后重试。");
       }
       setView(AppState.HOME);
+    } finally {
+      setIsProcessing(false);
     }
-  };
+  }, [isProcessing]);
 
   const finishQuiz = (userAnswers: number[]) => {
     let score = 0;
     const wrongPoints: string[] = [];
     userAnswers.forEach((ans, idx) => {
-      if (ans === questions[idx].answerIndex) {
-        score++;
-      } else {
-        wrongPoints.push(questions[idx].grammarPoint);
-      }
+      if (ans === questions[idx].answerIndex) score++;
+      else wrongPoints.push(questions[idx].grammarPoint);
     });
-    setResults({ 
-      score, 
-      total: questions.length, 
-      answers: userAnswers, 
-      questions, 
-      wrongGrammarPoints: Array.from(new Set(wrongPoints)) 
-    });
+    setResults({ score, total: questions.length, answers: userAnswers, questions, wrongGrammarPoints: Array.from(new Set(wrongPoints)) });
     setView(AppState.RESULT);
   };
 
@@ -190,7 +150,7 @@ const App: React.FC = () => {
           questions={questions} 
           onFinish={finishQuiz} 
           onCancel={() => setView(AppState.HOME)} 
-          onQuotaError={() => alert("当前请求过快，请休息一下。")}
+          onQuotaError={() => alert("AI 响应过快，请稍后提问。")}
           onAnswerSubmitted={handleAnswerSubmitted}
           onToggleSave={toggleSaveQuestion}
           savedHistory={userStats.savedHistory}
@@ -212,28 +172,17 @@ const App: React.FC = () => {
         />
       )}
 
-      {/* 全局清空确认弹窗 */}
       {clearConfirm.isOpen && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/40 backdrop-blur-sm p-6 animate-fadeIn">
           <div className="bg-white w-full max-w-sm rounded-[40px] p-8 shadow-2xl animate-fadeIn">
             <div className="text-center mb-6">
               <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl">⚠️</div>
-              <h3 className="text-xl font-black text-gray-900">确定要清空{clearConfirm.type === 'details' ? '所有错题' : '所有收藏'}吗？</h3>
-              <p className="text-xs text-gray-400 mt-2 font-medium">此操作不可逆，将清除本地和云端对应的该类记录。</p>
+              <h3 className="text-xl font-black text-gray-900">确定要清空吗？</h3>
+              <p className="text-xs text-gray-400 mt-2 font-medium">此操作不可逆。</p>
             </div>
             <div className="flex flex-col gap-3">
-              <button 
-                onClick={executeClearHistory} 
-                className="w-full py-4.5 bg-gray-900 text-white rounded-2xl font-black shadow-lg active:scale-95 transition-all"
-              >
-                全部清空
-              </button>
-              <button 
-                onClick={() => setClearConfirm({ isOpen: false, type: null })} 
-                className="w-full py-4.5 bg-gray-100 text-gray-500 rounded-2xl font-bold active:scale-95 transition-all"
-              >
-                点错了，返回
-              </button>
+              <button onClick={executeClearHistory} className="w-full py-4.5 bg-gray-900 text-white rounded-2xl font-black active:scale-95 transition-all">全部清空</button>
+              <button onClick={() => setClearConfirm({ isOpen: false, type: null })} className="w-full py-4.5 bg-gray-100 text-gray-500 rounded-2xl font-bold active:scale-95 transition-all">取消</button>
             </div>
           </div>
         </div>

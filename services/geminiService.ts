@@ -4,29 +4,26 @@ import { Question, Difficulty, ChatMessage, WrongQuestion } from "../types";
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-async function withRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
+async function withRetry<T>(fn: () => Promise<T>, retries = 5): Promise<T> {
   try {
     return await fn();
   } catch (error: any) {
     const errorStr = JSON.stringify(error).toLowerCase();
-    // 捕获频率限制(429)和常见的服务器临时错误(500, 502, 503, 504)
-    const isRetryable = 
-      errorStr.includes('429') || 
-      errorStr.includes('quota') || 
-      errorStr.includes('500') || 
-      errorStr.includes('503') ||
-      errorStr.includes('504');
+    const isQuota = errorStr.includes('429') || errorStr.includes('quota');
+    const isServerErr = errorStr.includes('500') || errorStr.includes('503') || errorStr.includes('504');
 
-    if (isRetryable && retries > 0) {
-      // 指数退避重试
-      await delay(2000 * (4 - retries));
+    if ((isQuota || isServerErr) && retries > 0) {
+      // 针对 429 频率限制采用更长的等待时间
+      const waitTime = isQuota ? (6 - retries) * 4000 : 2000; 
+      console.warn(`AI 忙碌中，${waitTime}ms 后进行第 ${6 - retries} 次重试...`);
+      await delay(waitTime);
       return withRetry(fn, retries - 1);
     }
     throw error;
   }
 }
 
-// 使用推荐的 Gemini 3 系列模型处理复杂任务
+// 采用最新的 Gemini 3 Flash 预览版，性能更强且更符合高考逻辑
 const TEXT_MODEL = 'gemini-3-flash-preview';
 
 const SCHEMA = {
@@ -52,39 +49,38 @@ export const generateGrammarQuestions = async (
   difficulty: Difficulty
 ): Promise<Question[]> => {
   return withRetry(async () => {
-    // 遵守规范：每次请求创建新实例，并直接使用 process.env.API_KEY
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const pointsDesc = targetPoints.length > 0 ? `考察考点：${targetPoints.join('、')}。` : "涵盖高考核心语法考点。";
     
     const response = await ai.models.generateContent({
       model: TEXT_MODEL,
-      contents: `请现在立即生成 ${count} 道单项填空练习题。难度设定为：${difficulty}。${pointsDesc}`,
+      contents: `请立即生成 ${count} 道单项填空练习题。难度：${difficulty}。${pointsDesc}`,
       config: {
-        systemInstruction: `你是一位专业的高考英语命题专家。
-        你的任务是生成高质量的语法单项填空题。
-        规则：
-        1. 题目情景必须贴近高中生活或现代社会。
-        2. 每题必须有 A, B, C, D 四个选项。
-        3. 提供精准的中文解析。
-        4. 必须严格遵循提供的 JSON Schema 格式返回数据。
-        5. 避免生成重复或逻辑错误的题目。`,
+        systemInstruction: `你是一位深耕高考英语 20 年的命题组专家。
+        要求：
+        1. 题目必须严谨，语境清晰。
+        2. 选项干扰项需具备典型性。
+        3. 解析要包含：句子结构分析、考点辨析、解题思路。
+        4. 严格按照 JSON Schema 格式输出，不包含任何 Markdown 标记。`,
         responseMimeType: "application/json",
         responseSchema: SCHEMA,
-        temperature: 0.4,
-        topP: 0.95
+        temperature: 0.5,
+        topP: 0.9,
+        // 降低候选数量以提高响应速度和稳定性
+        candidateCount: 1
       }
     });
     
-    // 遵守规范：使用 .text 属性获取结果
     const text = response.text || "[]";
     try {
       const data = JSON.parse(text) as any[];
+      if (!Array.isArray(data) || data.length === 0) throw new Error("EMPTY_RESPONSE");
       return data.map((q: any) => ({
         ...q,
-        id: q.id || `q_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+        id: q.id || `q_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
       })) as Question[];
     } catch (e) {
-      console.error("JSON Parsing failed, content:", text);
+      console.error("JSON 解析失败:", text);
       throw new Error("FORMAT_ERROR");
     }
   });
@@ -99,15 +95,19 @@ export const askFollowUpQuestion = async (
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const response = await ai.models.generateContent({
       model: TEXT_MODEL,
-      contents: `学生问："${userQuery}"`,
+      contents: `学生针对这道题问："${userQuery}"`,
       config: { 
-        systemInstruction: `你是一位耐心的英语老师。当前正在讨论的题目是 "${questionContext.question}"，正确选项是 "${questionContext.options[questionContext.answerIndex]}"。
-        请根据上下文和学生的疑问进行简洁明了的解答。`,
-        temperature: 0.6 
+        systemInstruction: `你是一位极具耐心的高考英语提分教练。
+        题目背景：${questionContext.question}
+        正确选项：${questionContext.options[questionContext.answerIndex]}
+        解析：${questionContext.explanation}
+        
+        请直接回答学生的疑问，口吻亲切，逻辑严密，多用引导式教学。`,
+        temperature: 0.7 
       }
     });
-    return response.text || "老师正在组织语言，请稍后再试。";
-  });
+    return response.text || "正在思考更好的解释方式...";
+  }, 2); // 追问只需重试 2 次
 };
 
 export const getGrammarDeepDive = async (
@@ -120,13 +120,12 @@ export const getGrammarDeepDive = async (
     
     const response = await ai.models.generateContent({
       model: TEXT_MODEL,
-      contents: `针对语法考点“${pointName}”生成复习讲义。学生错题背景：${context}`,
+      contents: `为“${pointName}”考点生成深度复习包。错题背景：${context}`,
       config: {
-        systemInstruction: `你是高考英语名师。请输出 JSON 格式的复习讲义。
-        字段：
-        1. lecture: 系统讲解规则（约200字）。
-        2. mistakeAnalysis: 分析易错原因（约100字）。
-        3. tips: 3条口诀或技巧（字符串数组）。`,
+        systemInstruction: `你正在为学生准备一份提分简报。请以 JSON 格式输出：
+        1. lecture: 核心考点讲解（干货、凝练）。
+        2. mistakeAnalysis: 为什么这类题容易错？
+        3. tips: 3 条拿分口诀。`,
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -140,7 +139,6 @@ export const getGrammarDeepDive = async (
         temperature: 0.3
       }
     });
-    const text = response.text || "{}";
-    return JSON.parse(text) as { lecture: string; mistakeAnalysis: string; tips: string[] };
+    return JSON.parse(response.text || "{}");
   });
 };
