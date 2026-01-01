@@ -1,13 +1,15 @@
 
 import React, { useMemo } from 'react';
 import { UserStats } from '../types';
+import { getManualBackupCode, importFromManualCode } from '../services/syncService';
 
 interface StatsViewProps {
   stats: UserStats;
   onBack: () => void;
+  onImportStats: (stats: UserStats) => void;
 }
 
-const StatsView: React.FC<StatsViewProps> = ({ stats, onBack }) => {
+const StatsView: React.FC<StatsViewProps> = ({ stats, onBack, onImportStats }) => {
   const overallAccuracy = stats.totalQuestionsAttempted > 0 
     ? Math.round((stats.totalCorrectAnswers / stats.totalQuestionsAttempted) * 100) 
     : 0;
@@ -31,7 +33,6 @@ const StatsView: React.FC<StatsViewProps> = ({ stats, onBack }) => {
       .slice(0, 5);
   }, [stats.wrongCounts]);
 
-  // 近7天数据趋势
   const recent7Days = useMemo(() => {
     const data = [];
     for (let i = 6; i >= 0; i--) {
@@ -48,6 +49,23 @@ const StatsView: React.FC<StatsViewProps> = ({ stats, onBack }) => {
   }, [stats.dailyStats]);
 
   const maxDailyAttempted = Math.max(...recent7Days.map(d => d.attempted), 5);
+
+  const handleExport = () => {
+    const code = getManualBackupCode(stats);
+    // 使用 prompt 方便手机端长按复制
+    window.prompt("请长按下方代码并复制，妥善保存：", code);
+  };
+
+  const handleImport = () => {
+    const code = window.prompt("请粘贴您的恢复代码：");
+    if (!code) return;
+    const newStats = importFromManualCode(code);
+    if (newStats) {
+      onImportStats(newStats);
+    } else {
+      alert("无效的代码，请重试。");
+    }
+  };
 
   return (
     <div className="flex-1 flex flex-col bg-gray-50 h-screen overflow-hidden">
@@ -99,12 +117,10 @@ const StatsView: React.FC<StatsViewProps> = ({ stats, onBack }) => {
               return (
                 <div key={i} className="flex-1 flex flex-col items-center">
                   <div className="w-full relative h-24 flex flex-col justify-end">
-                    {/* 总题量柱状图 */}
                     <div 
                       className="w-full bg-indigo-100 rounded-t-lg transition-all duration-700"
                       style={{ height: `${height}%` }}
                     >
-                      {/* 正确率覆盖层 */}
                       {day.attempted > 0 && (
                         <div 
                           className="w-full bg-indigo-600 rounded-t-lg"
@@ -118,16 +134,34 @@ const StatsView: React.FC<StatsViewProps> = ({ stats, onBack }) => {
               );
             })}
           </div>
-          <div className="flex gap-4 mt-4 justify-center">
-             <div className="flex items-center gap-1.5">
-               <div className="w-2 h-2 rounded-full bg-indigo-600"></div>
-               <span className="text-[9px] font-black text-gray-400 uppercase">正确题数</span>
-             </div>
-             <div className="flex items-center gap-1.5">
-               <div className="w-2 h-2 rounded-full bg-indigo-100"></div>
-               <span className="text-[9px] font-black text-gray-400 uppercase">错误题数</span>
-             </div>
+        </section>
+
+        {/* 手工数据管理 */}
+        <section className="bg-gradient-to-br from-indigo-600 to-violet-700 p-6 rounded-[32px] shadow-lg shadow-indigo-100 text-white">
+          <div className="flex items-center gap-3 mb-4">
+            <span className="text-2xl">☁️</span>
+            <div>
+              <h3 className="font-black text-sm">手工数据中心</h3>
+              <p className="text-[9px] opacity-70 uppercase font-bold tracking-widest">Manual Data Backup & Restore</p>
+            </div>
           </div>
+          <div className="grid grid-cols-2 gap-3">
+            <button 
+              onClick={handleExport}
+              className="py-3.5 bg-white/20 hover:bg-white/30 backdrop-blur-md rounded-2xl text-[12px] font-black border border-white/10 active:scale-95 transition-all"
+            >
+              生成备份代码
+            </button>
+            <button 
+              onClick={handleImport}
+              className="py-3.5 bg-white text-indigo-600 rounded-2xl text-[12px] font-black active:scale-95 transition-all shadow-xl"
+            >
+              恢复备份数据
+            </button>
+          </div>
+          <p className="text-[9px] mt-4 opacity-50 text-center leading-relaxed">
+            * 备份代码包含您的错题本、收藏及学习统计。<br/>请在更换手机或清理浏览器缓存前进行备份。
+          </p>
         </section>
 
         {/* 薄弱考点排行榜 */}
@@ -153,32 +187,6 @@ const StatsView: React.FC<StatsViewProps> = ({ stats, onBack }) => {
               <div className="text-center py-6 text-gray-300 italic text-sm">暂无错误记录，继续保持！</div>
             )}
           </div>
-        </section>
-
-        {/* 每日详细足迹 */}
-        <section className="space-y-3">
-          <h3 className="text-[11px] font-black text-gray-400 uppercase tracking-widest ml-2">每日训练足迹</h3>
-          {dailyHistory.length > 0 ? dailyHistory.map(([date, record]) => {
-            const acc = record.attempted > 0 ? Math.round((record.correct / record.attempted) * 100) : 0;
-            return (
-              <div key={date} className="bg-white p-5 rounded-[24px] border border-gray-100 flex justify-between items-center shadow-sm">
-                <div>
-                  <p className="text-[10px] font-black text-gray-400 uppercase mb-1">{date}</p>
-                  <p className="text-sm font-bold text-gray-800">练题 {record.attempted} 道</p>
-                </div>
-                <div className="text-right">
-                  <p className={`text-lg font-black ${acc >= 80 ? 'text-green-600' : acc >= 60 ? 'text-amber-500' : 'text-red-500'}`}>
-                    {acc}%
-                  </p>
-                  <p className="text-[9px] font-black text-gray-300 uppercase">当日正确率</p>
-                </div>
-              </div>
-            );
-          }) : (
-            <div className="text-center py-12 bg-white rounded-[24px] border border-dashed border-gray-200">
-               <p className="text-sm font-bold text-gray-300">还没有练习数据，开始通关吧！</p>
-            </div>
-          )}
         </section>
       </div>
     </div>

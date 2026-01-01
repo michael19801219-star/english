@@ -43,7 +43,6 @@ async function silentRetry<T>(fn: () => Promise<T>, attempts = 2): Promise<T> {
  * 获取 AI 实例的辅助函数，确保每次都从当前环境变量读取最新的 Key
  */
 const getAIInstance = () => {
-  // Fix: Strictly follow SDK guidelines for initializing GoogleGenAI with process.env.API_KEY
   return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
 
@@ -63,11 +62,13 @@ export const generateGrammarQuestions = async (
       model: TEXT_MODEL,
       contents: `Generate ${count} multiple-choice English grammar questions for High School Students. Difficulty: ${difficulty}. ${pointsDesc}`,
       config: {
-        systemInstruction: `You are a master English teacher. 
-        Return a JSON array of objects. Output ONLY raw JSON. No markdown tags.`,
+        systemInstruction: `You are a master English teacher for the Gaokao. 
+        Return a JSON array of objects. Output ONLY raw JSON. No markdown tags.
+        IMPORTANT: Ensure the distribution of correct answers (answerIndex: 0 for A, 1 for B, 2 for C, 3 for D) is roughly EQUAL and balanced. 
+        Do not make the same option the correct answer for too many consecutive questions.`,
         responseMimeType: "application/json",
         responseSchema: SCHEMA,
-        temperature: 0.5
+        temperature: 0.7
       }
     });
     
