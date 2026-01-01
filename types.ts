@@ -2,6 +2,7 @@
 export interface Question {
   id: string;
   question: string;
+  translation: string; // 新增：题目中文翻译
   options: string[];
   answerIndex: number;
   explanation: string;
@@ -35,6 +36,7 @@ export interface WrongQuestion extends Question {
 export interface UserStats {
   wrongCounts: Record<string, number>;
   wrongHistory: WrongQuestion[];
+  savedHistory: WrongQuestion[]; // 新增：收藏本历史
 }
 
 export interface ChatMessage {

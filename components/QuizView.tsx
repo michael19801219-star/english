@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Question, ChatMessage } from '../types';
+import { Question, ChatMessage, WrongQuestion } from '../types';
 import { askFollowUpQuestion } from '../services/geminiService';
 
 interface QuizViewProps {
@@ -8,9 +8,12 @@ interface QuizViewProps {
   onFinish: (answers: number[]) => void;
   onCancel: () => void;
   onQuotaError: () => void;
+  onToggleSave: (q: Question, userAnswerIndex?: number) => void;
+  onAnswerSubmitted: (q: Question, ans: number) => void;
+  savedHistory: WrongQuestion[];
 }
 
-const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel, onQuotaError }) => {
+const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel, onQuotaError, onToggleSave, onAnswerSubmitted, savedHistory }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [userAnswers, setUserAnswers] = useState<number[]>([]);
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
@@ -59,11 +62,7 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel, onQu
       const response = await askFollowUpQuestion(questions[currentIndex], chatHistory, query);
       setChatHistory(prev => [...prev, { role: 'model', content: response }]);
     } catch (err: any) {
-      if (err.message === "QUOTA_EXCEEDED") {
-        onQuotaError();
-      } else {
-        alert(err.message);
-      }
+      onQuotaError();
     } finally {
       setIsAsking(false);
     }
@@ -80,24 +79,47 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel, onQu
     else onFinish(newAnswers);
   };
 
+  const handleSubmit = () => {
+    if (selectedOption !== null) {
+      // 实时记录错题
+      onAnswerSubmitted(questions[currentIndex], selectedOption);
+      setShowFeedback(true);
+    }
+  };
+
+  const isSaved = savedHistory.some(s => s.question === questions[currentIndex].question);
+
   return (
     <div className="flex-1 flex flex-col p-6 animate-fadeIn h-screen relative bg-gray-50">
       {isExiting && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-md p-6">
-          <div className="bg-white w-full max-w-sm rounded-[40px] p-10 shadow-2xl animate-fadeIn text-center">
+          <div className="bg-white w-full max-w-sm rounded-[40px] p-10 shadow-2xl text-center">
             <div className="text-5xl mb-6">⚠️</div>
-            <h3 className="text-2xl font-black text-gray-900 mb-3">要退出练习吗？</h3>
+            <h3 className="text-2xl font-black mb-3 text-gray-900">要退出练习吗？</h3>
             <p className="text-gray-500 text-sm mb-8 font-medium italic">当前进度将不会保存到错题本。</p>
             <div className="flex flex-col gap-3">
-              <button onClick={onCancel} className="w-full py-4.5 bg-red-500 text-white rounded-2xl font-black shadow-lg shadow-red-100">确定退出</button>
+              <button onClick={onCancel} className="w-full py-4.5 bg-red-500 text-white rounded-2xl font-black shadow-lg">确定退出</button>
               <button onClick={() => setIsExiting(false)} className="w-full py-4.5 bg-gray-100 text-gray-600 rounded-2xl font-bold">继续练习</button>
             </div>
           </div>
         </div>
       )}
 
+      {/* 固定图层：下一题按钮放置在屏幕底部正中间 */}
+      {showFeedback && (
+        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[150] animate-fadeIn">
+          <button 
+            onClick={handleNext} 
+            className="px-8 py-3.5 bg-gray-900 text-white rounded-full text-[15px] font-black shadow-2xl active:scale-95 transition-all flex items-center gap-3 border border-white/20 whitespace-nowrap"
+          >
+            <span>{currentIndex === questions.length - 1 ? '查看测试报告' : '下一题'}</span>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
+          </button>
+        </div>
+      )}
+
       <header className="mb-6 flex-shrink-0">
-        <div className="flex justify-between items-center mb-4">
+        <div className="flex justify-between items-center mb-4 min-h-[48px]">
           <div className="flex flex-col">
             <span className="text-[10px] font-bold text-gray-400 tracking-widest mb-1 uppercase">Grammar Master Pro</span>
             <span className="text-sm font-black text-indigo-600">第 {currentIndex + 1} 题 / 共 {questions.length} 题</span>
@@ -136,44 +158,52 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel, onQu
         </div>
 
         {showFeedback && (
-          <div className="flex flex-col gap-6 animate-fadeIn pb-12">
+          <div className="flex flex-col gap-6 animate-fadeIn pb-32">
             <div className="p-7 bg-white rounded-[36px] border border-gray-100 shadow-sm relative overflow-hidden">
-              <div className="flex items-center gap-3 mb-5">
-                <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-xl shadow-sm ${selectedOption === questions[currentIndex].answerIndex ? 'bg-green-100' : 'bg-red-100'}`}>
-                  {selectedOption === questions[currentIndex].answerIndex ? '✅' : '❌'}
+              <div className="flex justify-between items-start mb-5">
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-xl shadow-sm ${selectedOption === questions[currentIndex].answerIndex ? 'bg-green-100' : 'bg-red-100'}`}>
+                    {selectedOption === questions[currentIndex].answerIndex ? '✅' : '❌'}
+                  </div>
+                  <div>
+                    <h4 className={`font-black tracking-tight text-lg ${selectedOption === questions[currentIndex].answerIndex ? 'text-green-700' : 'text-red-700'}`}>
+                      {selectedOption === questions[currentIndex].answerIndex ? '回答正确' : '回答错误'}
+                    </h4>
+                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Analysis & Insight</p>
+                  </div>
                 </div>
-                <div>
-                  <h4 className={`font-black tracking-tight text-lg ${selectedOption === questions[currentIndex].answerIndex ? 'text-green-700' : 'text-red-700'}`}>
-                    {selectedOption === questions[currentIndex].answerIndex ? '回答正确' : '回答错误'}
-                  </h4>
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Analysis & Insight</p>
-                </div>
+                <button 
+                  onClick={() => onToggleSave(questions[currentIndex], selectedOption!)}
+                  className={`p-3 rounded-2xl transition-all active:scale-90 ${isSaved ? 'bg-amber-100 text-amber-600' : 'bg-gray-50 text-gray-300'}`}
+                >
+                  {isSaved ? '★ 已收藏' : '☆ 收藏'}
+                </button>
               </div>
-              <div className="text-[14px] text-gray-600 leading-[1.8] bg-gray-50/80 p-6 rounded-[28px] font-medium border border-gray-50 italic">
+
+              <div className="mb-4 p-4 bg-amber-50/50 rounded-2xl border border-amber-100/30">
+                <span className="text-[10px] font-black text-amber-600 block mb-1 uppercase">译文</span>
+                <p className="text-[13px] text-amber-900 font-medium italic">{questions[currentIndex].translation}</p>
+              </div>
+
+              <div className="text-[14px] text-gray-600 leading-[1.8] bg-gray-50/80 p-6 rounded-[28px] font-medium border border-gray-50">
+                <span className="text-[10px] font-black text-indigo-600 block mb-2 uppercase tracking-widest">中文解析</span>
                 {questions[currentIndex].explanation}
               </div>
             </div>
 
             <div className="p-7 bg-indigo-50/50 rounded-[40px] border border-indigo-100/50 flex flex-col relative overflow-hidden backdrop-blur-sm">
-              <div className="flex justify-between items-center mb-6">
-                <div className="flex items-center gap-3">
-                   <div className="w-10 h-10 bg-indigo-600 rounded-[18px] flex items-center justify-center text-white text-[10px] font-black shadow-lg shadow-indigo-200 ring-4 ring-white">AI</div>
-                   <div>
-                     <h4 className="text-[15px] font-black text-indigo-900 tracking-tight">AI 助教答疑</h4>
-                     <p className="text-[9px] font-bold text-indigo-400 uppercase tracking-tighter">Real-time Tutor</p>
-                   </div>
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-10 h-10 bg-indigo-600 rounded-[18px] flex items-center justify-center text-white text-[10px] font-black">AI</div>
+                <div>
+                  <h4 className="text-[15px] font-black text-indigo-900 tracking-tight">AI 助教答疑</h4>
+                  <p className="text-[9px] font-bold text-indigo-400 uppercase">中文服务</p>
                 </div>
               </div>
 
               <div className="flex flex-col gap-4 mb-8 max-h-[500px] overflow-y-auto no-scrollbar">
-                {chatHistory.length === 0 && (
-                  <div className="text-center py-6">
-                    <p className="text-[12px] text-indigo-300 font-bold italic">对这道题还有不理解的地方？在下方问问我吧！</p>
-                  </div>
-                )}
                 {chatHistory.map((msg, idx) => (
                   <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-fadeIn`}>
-                    <div className={`max-w-[88%] p-5 rounded-[28px] text-[15px] font-medium leading-relaxed relative shadow-sm ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-br-none' : 'bg-white text-gray-700 rounded-bl-none border border-indigo-50'}`}>
+                    <div className={`max-w-[88%] p-5 rounded-[28px] text-[15px] font-medium leading-relaxed shadow-sm ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-br-none' : 'bg-white text-gray-700 rounded-bl-none border border-indigo-50'}`}>
                       {msg.content}
                     </div>
                   </div>
@@ -183,38 +213,22 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel, onQu
                     <div className="bg-white p-5 rounded-3xl border border-indigo-50 flex gap-2 animate-pulse shadow-sm">
                       <div className="w-1.5 h-1.5 bg-indigo-200 rounded-full"></div>
                       <div className="w-1.5 h-1.5 bg-indigo-300 rounded-full"></div>
-                      <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full"></div>
                     </div>
                   </div>
                 )}
                 <div ref={chatEndRef} />
               </div>
 
-              <div className="relative flex items-center gap-2 sticky bottom-0">
-                <div className="relative flex-1">
-                  <input
-                    type="text"
-                    value={followUpQuery}
-                    onChange={(e) => setFollowUpQuery(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleAskTutor()}
-                    placeholder={isRecognizing ? "我正在听..." : "输入你的语法疑问..."}
-                    className={`w-full py-5 pl-6 pr-14 bg-white rounded-[24px] border-none text-[15px] font-bold shadow-lg transition-all focus:ring-4 focus:ring-indigo-500/10 placeholder:text-gray-300 ${isRecognizing ? 'ring-2 ring-indigo-500 bg-indigo-50' : ''}`}
-                  />
-                  <button 
-                    onClick={() => {
-                      if (isRecognizing) recognitionRef.current?.stop();
-                      else recognitionRef.current?.start();
-                    }} 
-                    className={`absolute right-3.5 top-1/2 -translate-y-1/2 w-10 h-10 rounded-2xl flex items-center justify-center transition-all ${isRecognizing ? 'bg-indigo-600 text-white animate-pulse' : 'text-gray-300 hover:text-indigo-400'}`}
-                  >
-                    🎙️
-                  </button>
-                </div>
-                <button 
-                  onClick={handleAskTutor} 
-                  disabled={!followUpQuery.trim() || isAsking} 
-                  className={`w-14 h-14 rounded-[22px] shadow-xl transition-all flex items-center justify-center ${!followUpQuery.trim() || isAsking ? 'bg-gray-100 text-gray-300' : 'bg-indigo-600 text-white active:scale-90 hover:bg-indigo-700'}`}
-                >
+              <div className="relative flex items-center gap-2">
+                <input
+                  type="text"
+                  value={followUpQuery}
+                  onChange={(e) => setFollowUpQuery(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleAskTutor()}
+                  placeholder="输入你的语法疑问..."
+                  className="flex-1 py-5 px-6 bg-white rounded-[24px] border-none text-[15px] font-bold shadow-lg"
+                />
+                <button onClick={handleAskTutor} disabled={!followUpQuery.trim() || isAsking} className="w-14 h-14 bg-indigo-600 text-white rounded-[22px] shadow-xl flex items-center justify-center active:scale-90">
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 12h14M12 5l7 7-7 7" /></svg>
                 </button>
               </div>
@@ -224,26 +238,16 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel, onQu
       </main>
 
       <footer className="py-6 flex-shrink-0 safe-area-bottom">
-        {!showFeedback ? (
+        {!showFeedback && (
           <button 
             disabled={selectedOption === null} 
-            onClick={() => setShowFeedback(true)} 
-            className={`w-full py-5 rounded-[28px] font-black text-xl shadow-2xl transition-all ${selectedOption === null ? 'bg-gray-200 text-gray-400' : 'bg-indigo-600 text-white active:scale-[0.98] shadow-indigo-200 hover:bg-indigo-700'}`}
+            onClick={handleSubmit} 
+            className={`w-full py-5 rounded-[28px] font-black text-xl shadow-2xl transition-all ${selectedOption === null ? 'bg-gray-200 text-gray-400' : 'bg-indigo-600 text-white shadow-indigo-200 hover:bg-indigo-700'}`}
           >
             确认提交
           </button>
-        ) : (
-          <button onClick={handleNext} className="w-full bg-gray-900 text-white py-5 rounded-[28px] font-black text-xl shadow-2xl flex items-center justify-center gap-3 active:scale-[0.98] transition-all hover:bg-black">
-            <span>{currentIndex === questions.length - 1 ? '查看测试报告' : '下一题'}</span>
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
-          </button>
         )}
       </footer>
-
-      <style>{`
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-      `}</style>
     </div>
   );
 };
