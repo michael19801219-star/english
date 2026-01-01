@@ -1,17 +1,14 @@
 
-import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { WrongQuestion, ChatMessage } from '../types';
-import { getGrammarDeepDive, askFollowUpQuestion } from '../services/geminiService';
+import React, { useState, useMemo, useEffect } from 'react';
+import { WrongQuestion } from '../types';
+import { getGrammarDeepDive } from '../services/geminiService';
 
 interface ReviewViewProps {
   history: WrongQuestion[];
-  savedHistory: WrongQuestion[];
   onBack: () => void;
-  onClear: (type: 'details' | 'saved') => void;
-  onDeleteWrong: (timestamp: number) => void;
-  onDeleteSaved: (timestamp: number) => void;
+  onClear: () => void;
   onStartQuiz: (point: string) => void;
-  initialTab?: 'summary' | 'details' | 'saved';
+  initialTab?: 'summary' | 'details';
 }
 
 interface DeepDiveData {
@@ -20,394 +17,268 @@ interface DeepDiveData {
   tips: string[];
 }
 
-const ReviewView: React.FC<ReviewViewProps> = ({ 
-  history, 
-  savedHistory, 
-  onBack, 
-  onClear, 
-  onDeleteWrong, 
-  onDeleteSaved, 
-  onStartQuiz, 
-  initialTab = 'summary' 
-}) => {
-  const [activeTab, setActiveTab] = useState<'summary' | 'details' | 'saved'>(initialTab);
+const ReviewView: React.FC<ReviewViewProps> = ({ history, onBack, onClear, onStartQuiz, initialTab = 'summary' }) => {
+  const [activeTab, setActiveTab] = useState<'summary' | 'details'>(initialTab);
   const [selectedPoint, setSelectedPoint] = useState<string | null>(null);
   const [deepDives, setDeepDives] = useState<Record<string, DeepDiveData>>({});
   const [loadingPoints, setLoadingPoints] = useState<Record<string, boolean>>({});
-  
-  // 单题删除确认状态
-  const [singleDeleteConfirm, setSingleDeleteConfirm] = useState<{ 
-    isOpen: boolean; 
-    item: WrongQuestion | null; 
-    type: 'details' | 'saved' | null 
-  }>({
-    isOpen: false,
-    item: null,
-    type: null
-  });
-
-  // AI 提问相关
-  const [activeChatId, setActiveChatId] = useState<number | null>(null);
-  const [followUpQuery, setFollowUpQuery] = useState('');
-  const [isAsking, setIsAsking] = useState(false);
-  const [chatHistories, setChatHistories] = useState<Record<number, ChatMessage[]>>({});
-  const [isRecognizing, setIsRecognizing] = useState(false);
-  const recognitionRef = useRef<any>(null);
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  const [errorPoints, setErrorPoints] = useState<Record<string, boolean>>({});
+  const [isGlobalLoading, setIsGlobalLoading] = useState(false);
 
   useEffect(() => {
     setActiveTab(initialTab);
   }, [initialTab]);
 
-  useEffect(() => {
-    if (chatEndRef.current) {
-      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [chatHistories, isAsking, activeChatId]);
-
-  // 初始化语音识别
-  useEffect(() => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (SpeechRecognition) {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.lang = 'zh-CN';
-      recognition.interimResults = true;
-      recognition.onstart = () => setIsRecognizing(true);
-      recognition.onend = () => setIsRecognizing(false);
-      recognition.onresult = (event: any) => {
-        const transcript = Array.from(event.results).map((r: any) => r[0].transcript).join('');
-        setFollowUpQuery(transcript);
-      };
-      recognitionRef.current = recognition;
-    }
-  }, []);
-
-  const currentItems = useMemo(() => {
-    return activeTab === 'details' ? history : (activeTab === 'saved' ? savedHistory : []);
-  }, [activeTab, history, savedHistory]);
-
   const knowledgeMap = useMemo(() => {
-    const acc: Record<string, { count: number; questions: WrongQuestion[] }> = {};
+    const map: Record<string, { count: number; questions: WrongQuestion[] }> = {};
     history.forEach(q => {
-      const point = q.grammarPoint || '通用语法';
-      if (!acc[point]) acc[point] = { count: 0, questions: [] };
-      acc[point].count++;
-      acc[point].questions.push(q);
+      if (!map[q.grammarPoint]) {
+        map[q.grammarPoint] = { count: 0, questions: [] };
+      }
+      map[q.grammarPoint].count++;
+      map[q.grammarPoint].questions.push(q);
     });
-    return acc;
+    return map;
   }, [history]);
 
   const sortedPoints = useMemo(() => {
-    return Object.entries(knowledgeMap).sort((a, b) => b[1].count - a[1].count);
+    const entries = Object.entries(knowledgeMap) as Array<[string, { count: number; questions: WrongQuestion[] }]>;
+    return entries.sort((a, b) => b[1].count - a[1].count);
   }, [knowledgeMap]);
 
-  const groupedDetailedData = useMemo(() => {
-    const acc: Record<string, WrongQuestion[]> = {};
-    currentItems.forEach(q => {
-      const point = q.grammarPoint || '通用语法';
-      if (!acc[point]) acc[point] = [];
-      acc[point].push(q);
-    });
-    return acc;
-  }, [currentItems]);
+  const fetchDeepDive = async (point: string) => {
+    // 防止并发请求：如果已经在加载任何东西，或者当前点正在加载，则跳过
+    if (isGlobalLoading || loadingPoints[point]) return;
+    
+    setIsGlobalLoading(true);
+    setErrorPoints(prev => ({ ...prev, [point]: false }));
+    setLoadingPoints(prev => ({ ...prev, [point]: true }));
+    
+    try {
+      const data = await getGrammarDeepDive(point, knowledgeMap[point].questions);
+      setDeepDives(prev => ({ ...prev, [point]: data }));
+    } catch (err: any) {
+      console.error("Deep dive generation failed", err);
+      setErrorPoints(prev => ({ ...prev, [point]: true }));
+    } finally {
+      setLoadingPoints(prev => ({ ...prev, [point]: false }));
+      // 故意留出 1 秒间隔，缓解 API 压力
+      setTimeout(() => setIsGlobalLoading(false), 1000);
+    }
+  };
 
-  const handleTogglePoint = async (point: string) => {
+  const handleTogglePoint = (point: string) => {
     if (selectedPoint === point) {
       setSelectedPoint(null);
       return;
     }
+
     setSelectedPoint(point);
-    
-    if (!deepDives[point]) {
-      setLoadingPoints(p => ({ ...p, [point]: true }));
-      try {
-        const pointData = knowledgeMap[point];
-        if (pointData) {
-          const data = await getGrammarDeepDive(point, pointData.questions);
-          setDeepDives(p => ({ ...p, [point]: data }));
-        }
-      } catch (e) {
-        console.error("Deep dive error:", e);
-      } finally {
-        setLoadingPoints(p => ({ ...p, [point]: false }));
-      }
+
+    if (!deepDives[point] && knowledgeMap[point]) {
+      fetchDeepDive(point);
     }
   };
 
-  const handleAskAI = async (question: WrongQuestion) => {
-    if (!followUpQuery.trim() || isAsking) return;
-    const query = followUpQuery.trim();
-    const qId = question.timestamp;
-    
-    setChatHistories(prev => ({
-      ...prev,
-      [qId]: [...(prev[qId] || []), { role: 'user', content: query }]
-    }));
-    setFollowUpQuery('');
-    setIsAsking(true);
-
-    try {
-      const currentChatHistory = chatHistories[qId] || [];
-      const response = await askFollowUpQuestion(question, currentChatHistory, query);
-      setChatHistories(prev => ({
-        ...prev,
-        [qId]: [...(prev[qId] || []), { role: 'model', content: response }]
-      }));
-    } catch (err) {
-      alert("AI 暂时离线，请重试。");
-    } finally {
-      setIsAsking(false);
+  const getDifficultyColor = (diff?: string) => {
+    switch(diff) {
+      case '简单': return 'bg-blue-50 text-blue-600 border-blue-100';
+      case '中等': return 'bg-violet-50 text-violet-600 border-violet-100';
+      case '较难': return 'bg-orange-50 text-orange-600 border-orange-100';
+      default: return 'bg-gray-50 text-gray-500 border-gray-100';
     }
-  };
-
-  const openDeleteModal = (e: React.MouseEvent, q: WrongQuestion) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setSingleDeleteConfirm({
-      isOpen: true,
-      item: q,
-      type: activeTab === 'details' ? 'details' : 'saved'
-    });
-  };
-
-  const confirmDelete = () => {
-    if (singleDeleteConfirm.item) {
-      if (singleDeleteConfirm.type === 'details') {
-        onDeleteWrong(singleDeleteConfirm.item.timestamp);
-      } else {
-        onDeleteSaved(singleDeleteConfirm.item.timestamp);
-      }
-    }
-    setSingleDeleteConfirm({ isOpen: false, item: null, type: null });
   };
 
   return (
     <div className="flex-1 flex flex-col bg-[#FDFCF8] min-h-screen">
-      <div className="sticky top-0 z-50 bg-white/95 backdrop-blur-md shadow-sm border-b border-gray-100">
-        <header className="px-6 pt-6 pb-2 flex justify-between items-center">
-          <div className="flex items-center gap-4">
-            <button onClick={onBack} className="w-10 h-10 flex items-center justify-center rounded-full bg-gray-50 text-gray-400 active:scale-90 transition-all">
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7"/></svg>
-            </button>
-            <h1 className="text-xl font-black text-gray-900 tracking-tight">语法笔记本</h1>
+      <header className="p-6 bg-white border-b border-gray-100 flex justify-between items-center sticky top-0 z-10 shadow-sm">
+        <div className="flex items-center gap-4">
+          <button onClick={onBack} className="w-10 h-10 flex items-center justify-center rounded-full bg-gray-50 text-gray-400 active:scale-90 transition-all">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7"/></svg>
+          </button>
+          <div>
+            <h1 className="text-xl font-black text-gray-900 tracking-tight">语法笔记</h1>
+            <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">Mastery Notes</p>
           </div>
-          {(activeTab === 'details' && history.length > 0) || (activeTab === 'saved' && savedHistory.length > 0) ? (
-            <button onClick={() => onClear(activeTab === 'details' ? 'details' : 'saved')} className="px-4 py-2 text-[11px] font-black text-red-500 bg-red-50 rounded-xl active:scale-95">清空本页</button>
-          ) : null}
-        </header>
-
-        <div className="px-6 py-4 flex gap-2 overflow-x-auto no-scrollbar">
-          {(['summary', 'details', 'saved'] as const).map(tab => (
-            <button 
-              key={tab} 
-              onClick={() => setActiveTab(tab)} 
-              className={`px-4 py-2.5 rounded-xl text-[11px] font-black whitespace-nowrap transition-all border-2 ${activeTab === tab ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-white border-gray-100 text-gray-400'}`}
-            >
-              {tab === 'summary' ? '📝 考点提炼' : tab === 'details' ? `错题集 (${history.length})` : `收藏本 (${savedHistory.length})`}
-            </button>
-          ))}
         </div>
+        <div className="flex items-center gap-2">
+          {history.length > 0 && (
+            <button onClick={onClear} className="px-4 py-2 text-[11px] font-black text-red-400 bg-red-50 rounded-xl active:opacity-60">清空</button>
+          )}
+        </div>
+      </header>
+
+      <div className="px-6 py-4 bg-white/50 backdrop-blur-sm border-b border-gray-100 flex gap-4 overflow-x-auto no-scrollbar">
+        <button onClick={() => setActiveTab('summary')} className={`flex-1 py-3 px-4 rounded-2xl text-xs font-black transition-all whitespace-nowrap border-2 ${activeTab === 'summary' ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg shadow-indigo-100' : 'bg-white border-gray-100 text-gray-400'}`}>📝 知识点提炼</button>
+        <button onClick={() => setActiveTab('details')} className={`flex-1 py-3 px-4 rounded-2xl text-xs font-black transition-all whitespace-nowrap border-2 ${activeTab === 'details' ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg shadow-indigo-100' : 'bg-white border-gray-100 text-gray-400'}`}>📜 错题明细</button>
       </div>
 
-      <div className="flex-1 overflow-y-auto pb-32 px-6 pt-6 no-scrollbar">
-        {activeTab === 'summary' ? (
-          sortedPoints.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-64 text-gray-300">
-              <span className="text-6xl mb-4 opacity-50">📚</span>
-              <p className="font-bold text-sm">还没有错题提炼，多刷题变强！</p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {sortedPoints.map(([point, data]) => {
-                const diveData = deepDives[point];
-                const isLoading = loadingPoints[point];
-                return (
-                  <div key={point} className="bg-white rounded-[24px] border border-gray-100 overflow-hidden shadow-sm transition-all duration-300">
-                    <button onClick={() => handleTogglePoint(point)} className="w-full p-6 flex justify-between items-center text-left active:bg-gray-50">
+      {history.length === 0 ? (
+        <main className="flex-1 flex flex-col items-center justify-center p-12 text-center">
+          <div className="w-32 h-32 bg-indigo-50 rounded-full flex items-center justify-center text-5xl mb-6 grayscale opacity-50">✍️</div>
+          <h3 className="text-lg font-bold text-gray-900 mb-2">笔记簿空空如也</h3>
+          <p className="text-sm text-gray-400 leading-relaxed">开始练习，AI 将会自动为你整理<br/>错题中的核心考点与知识逻辑。</p>
+        </main>
+      ) : (
+        <main className="flex-1 p-6 space-y-8 animate-fadeIn pb-20">
+          {activeTab === 'summary' ? (
+            <div className="space-y-6">
+              {sortedPoints.length > 0 && (
+                <section className="bg-gradient-to-br from-indigo-700 to-violet-700 rounded-[32px] p-8 text-white shadow-xl shadow-indigo-100 relative overflow-hidden">
+                  <div className="absolute -right-8 -top-8 w-32 h-32 bg-white/10 rounded-full blur-2xl"></div>
+                  <div className="relative z-10">
+                    <p className="text-white/60 text-[10px] font-black uppercase tracking-widest mb-4">Focus Analysis</p>
+                    <h2 className="text-2xl font-black mb-6 leading-tight">你需要重点关注<br/><span className="text-yellow-300">#{sortedPoints[0][0]}</span></h2>
+                    <div className="flex items-center gap-4 p-4 bg-white/10 rounded-2xl border border-white/10">
+                      <div className="text-2xl">🎯</div>
+                      <p className="text-xs text-white/90 font-medium leading-relaxed italic">该考点错误率最高，AI 建议你逐个查阅下方清单进行复盘。</p>
+                    </div>
+                  </div>
+                </section>
+              )}
+
+              <div className="space-y-4">
+                <h4 className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full"></span> 考点逻辑清单
+                </h4>
+                {sortedPoints.map(([point, data]) => (
+                  <div key={point} className={`bg-white rounded-[28px] border transition-all duration-300 ${selectedPoint === point ? 'ring-2 ring-indigo-500 border-transparent shadow-lg' : 'border-gray-100'}`}>
+                    <button onClick={() => handleTogglePoint(point)} className="w-full p-6 flex items-center justify-between text-left">
                       <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center font-black shadow-sm">{data.count}</div>
-                        <span className="font-bold text-gray-900 tracking-tight">{point}</span>
-                      </div>
-                      <svg className={`w-5 h-5 text-gray-300 transition-transform duration-300 ${selectedPoint === point ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7"/></svg>
-                    </button>
-                    {selectedPoint === point && (
-                      <div className="px-6 pb-6 border-t border-gray-50 animate-fadeIn pt-4 space-y-4">
-                        {isLoading ? (
-                          <div className="py-12 flex flex-col items-center gap-4">
-                             <div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-                             <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest animate-pulse">AI 讲义深度构建中...</p>
-                          </div>
-                        ) : diveData ? (
-                          <>
-                            <div className="p-5 bg-indigo-50/50 rounded-2xl border border-indigo-100/30">
-                              <span className="text-[10px] font-black text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded uppercase block w-max mb-2">Master Lecture</span>
-                              <p className="text-[13px] text-indigo-900 leading-relaxed font-medium">{diveData.lecture}</p>
-                            </div>
-                            <div className="p-5 bg-red-50/50 rounded-2xl border border-red-100/30">
-                              <h6 className="text-[10px] font-black text-red-700 uppercase mb-2">易错陷阱</h6>
-                              <p className="text-[13px] text-red-900 leading-relaxed font-medium">{diveData.mistakeAnalysis}</p>
-                            </div>
-                            <div className="p-5 bg-green-50/50 rounded-2xl border border-green-100/30">
-                              <h6 className="text-[10px] font-black text-green-700 uppercase mb-2">提分技巧</h6>
-                              <ul className="space-y-2">
-                                {diveData.tips.map((tip, i) => (
-                                  <li key={i} className="text-[13px] text-green-900 leading-relaxed font-bold flex gap-2">
-                                    <span className="text-green-400">#</span> {tip}
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                            <button onClick={() => onStartQuiz(point)} className="w-full py-4.5 bg-indigo-600 text-white rounded-[20px] font-black text-sm active:scale-95 shadow-lg transition-all">
-                              针对此考点强化训练
-                            </button>
-                          </>
-                        ) : (
-                          <div className="text-center py-8 text-gray-300">讲义加载失败</div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )
-        ) : (
-          Object.keys(groupedDetailedData).length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-64 text-gray-300">
-              <span className="text-6xl mb-4 opacity-50">🍃</span>
-              <p className="font-bold">此列表暂无题目</p>
-            </div>
-          ) : (
-            <div className="space-y-8">
-              {Object.entries(groupedDetailedData).map(([point, items]) => (
-                <div key={point} className="space-y-4">
-                  <div className="flex items-center gap-3 py-2">
-                     <div className="w-1.5 h-6 bg-indigo-500 rounded-full"></div>
-                     <h3 className="font-black text-gray-900 tracking-tight">{point}</h3>
-                  </div>
-                  {items.map((q) => {
-                    const isChatting = activeChatId === q.timestamp;
-                    const qChatHistory = chatHistories[q.timestamp] || [];
-                    
-                    return (
-                      <div key={q.timestamp} className="bg-white rounded-[32px] border border-gray-100 shadow-sm relative overflow-hidden group">
-                        <div className="p-6">
-                          <button 
-                            onClick={(e) => openDeleteModal(e, q)}
-                            className="absolute top-4 right-4 w-9 h-9 flex items-center justify-center rounded-full bg-red-50 text-red-400 active:scale-90 transition-all z-20"
-                          >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                          </button>
-                          
-                          <p className="text-[15px] font-bold text-gray-800 mb-2 pr-8 leading-relaxed">{q.question}</p>
-                          
-                          {/* 题目中文翻译 */}
-                          {q.translation && (
-                            <div className="mb-4 p-3 bg-amber-50 rounded-xl border border-amber-100/50">
-                              <p className="text-[12px] text-amber-900 font-bold italic">【翻译】{q.translation}</p>
-                            </div>
-                          )}
-
-                          <div className="space-y-2 mb-6">
-                            {q.options.map((opt, i) => (
-                              <div key={i} className={`p-4 rounded-2xl text-[13px] border-2 transition-all ${i === q.answerIndex ? 'bg-green-50 border-green-200 text-green-700 font-black' : i === q.userAnswerIndex ? 'bg-red-50 border-red-200 text-red-700' : 'bg-gray-50 border-transparent text-gray-400'}`}>
-                                {String.fromCharCode(65 + i)}. {opt}
-                              </div>
-                            ))}
-                          </div>
-                          
-                          <div className="p-5 bg-indigo-50/30 rounded-2xl text-[12px] text-gray-600 leading-relaxed border border-indigo-100/20 mb-4">
-                            <span className="font-black text-indigo-600 block mb-2 tracking-widest uppercase text-[10px]">考点深度解析</span>
-                            {q.explanation}
-                          </div>
-
-                          <button 
-                            onClick={() => setActiveChatId(isChatting ? null : q.timestamp)}
-                            className={`w-full py-4 rounded-2xl font-black text-xs flex items-center justify-center gap-2 transition-all ${isChatting ? 'bg-gray-900 text-white shadow-xl' : 'bg-indigo-50 text-indigo-600 border border-indigo-100'}`}
-                          >
-                            <span>{isChatting ? '收起 AI 答疑' : '🤖 针对此题向 AI 提问'}</span>
-                          </button>
+                        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl shadow-sm ${data.count >= 5 ? 'bg-red-50 text-red-500' : 'bg-indigo-50 text-indigo-500'}`}>
+                          {data.count >= 5 ? '🔥' : '💡'}
                         </div>
-
-                        {isChatting && (
-                          <div className="bg-indigo-50/50 p-6 border-t border-indigo-100/30 animate-fadeIn">
-                            <div className="flex flex-col gap-4 mb-6 max-h-[350px] overflow-y-auto no-scrollbar">
-                              {qChatHistory.length === 0 && (
-                                <p className="text-center text-[11px] text-indigo-300 font-bold italic py-4">
-                                  这题哪里不明白？或者想知道相关的变式题？
-                                </p>
-                              )}
-                              {qChatHistory.map((msg, idx) => (
-                                <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                  <div className={`max-w-[85%] p-4 rounded-[22px] text-[13px] font-medium leading-relaxed ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-br-none' : 'bg-white text-gray-700 rounded-bl-none border border-indigo-50'}`}>
-                                    {msg.content}
+                        <div>
+                          <h5 className="font-bold text-gray-900">{point}</h5>
+                          <p className="text-xs text-gray-400 font-medium">涉及 {data.count} 道错题记录</p>
+                        </div>
+                      </div>
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-transform ${selectedPoint === point ? 'rotate-180 bg-indigo-50 text-indigo-600' : 'bg-gray-50 text-gray-300'}`}>
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7"/></svg>
+                      </div>
+                    </button>
+                    
+                    {selectedPoint === point && (
+                      <div className="px-6 pb-6 animate-fadeIn">
+                        <div className="pt-4 border-t border-gray-50 space-y-5">
+                          {loadingPoints[point] ? (
+                            <div className="py-8 flex flex-col items-center justify-center space-y-3">
+                              <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
+                              <p className="text-[11px] text-gray-400 font-bold">AI 正在调取错题库并生成解析...</p>
+                            </div>
+                          ) : errorPoints[point] ? (
+                            <div className="py-8 flex flex-col items-center justify-center space-y-4">
+                               <div className="text-3xl">⏳</div>
+                               <p className="text-[13px] text-gray-500 font-bold">由于配额限制，解析生成失败</p>
+                               <button 
+                                 disabled={isGlobalLoading}
+                                 onClick={() => fetchDeepDive(point)}
+                                 className={`px-6 py-2.5 rounded-full text-xs font-black transition-all ${isGlobalLoading ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-indigo-50 text-indigo-600 active:scale-95'}`}
+                               >
+                                 {isGlobalLoading ? '请稍候...' : '点击重新尝试'}
+                               </button>
+                            </div>
+                          ) : deepDives[point] ? (
+                            <div className="space-y-4">
+                              <div className="bg-indigo-50/50 p-5 rounded-[22px] border border-indigo-100/50">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <span className="text-lg">📘</span>
+                                  <h6 className="text-[12px] font-black text-indigo-700 uppercase tracking-tight">考点深度精讲</h6>
+                                </div>
+                                <p className="text-[13px] text-indigo-900 font-medium leading-relaxed">{deepDives[point].lecture}</p>
+                              </div>
+                              <div className="bg-red-50/50 p-5 rounded-[22px] border border-red-100/50">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <span className="text-lg">🔍</span>
+                                  <h6 className="text-[12px] font-black text-red-700 uppercase tracking-tight">个性化错因分析</h6>
+                                </div>
+                                <p className="text-[13px] text-red-900 font-medium leading-relaxed italic">“{deepDives[point].mistakeAnalysis}”</p>
+                              </div>
+                              <div className="bg-amber-50/50 p-5 rounded-[22px] border border-amber-100/50">
+                                <div className="flex items-center gap-2 mb-3">
+                                  <span className="text-lg">⚠️</span>
+                                  <h6 className="text-[12px] font-black text-amber-700 uppercase tracking-tight">高考避坑指南</h6>
+                                </div>
+                                <ul className="space-y-2">
+                                  {deepDives[point].tips.map((tip, i) => (
+                                    <li key={i} className="text-[12px] text-amber-900 font-bold flex gap-2"><span className="opacity-40">•</span>{tip}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                              <button onClick={() => onStartQuiz(point)} className="w-full py-4.5 bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-[24px] font-black text-[15px] shadow-xl shadow-indigo-100 active:scale-[0.97] transition-all flex items-center justify-center gap-3">
+                                <span className="text-xl">🚀</span><span>开启专项突破</span>
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="p-4 text-center text-xs text-gray-400 italic">点击卡片获取 AI 深度解析。</div>
+                          )}
+                          <div className="mt-8 pt-4 border-t border-gray-50">
+                            <h6 className="text-[10px] font-black text-gray-300 mb-4 uppercase tracking-widest text-center">— 关联错题回顾 —</h6>
+                            <div className="space-y-4">
+                              {data.questions.map((q, idx) => (
+                                <div key={idx} className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+                                  <p className="text-[13px] text-gray-700 font-bold leading-relaxed mb-4">{q.question.replace('_____', '____')}</p>
+                                  <div className="space-y-2">
+                                    <div className="flex items-start gap-3 p-3 bg-red-50/50 rounded-xl border border-red-50">
+                                      <span className="text-[10px] bg-red-500 text-white w-4 h-4 rounded-md flex items-center justify-center font-black mt-0.5">{String.fromCharCode(65 + q.userAnswerIndex)}</span>
+                                      <div className="flex-1">
+                                        <p className="text-[11px] text-gray-400 font-bold uppercase mb-0.5">你的选择</p>
+                                        <p className="text-[13px] text-red-700 font-medium">{q.options[q.userAnswerIndex]}</p>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-start gap-3 p-3 bg-green-50/50 rounded-xl border border-green-50">
+                                      <span className="text-[10px] bg-green-500 text-white w-4 h-4 rounded-md flex items-center justify-center font-black mt-0.5">{String.fromCharCode(65 + q.answerIndex)}</span>
+                                      <div className="flex-1">
+                                        <p className="text-[11px] text-gray-400 font-bold uppercase mb-0.5">正确答案</p>
+                                        <p className="text-[13px] text-green-700 font-bold">{q.options[q.answerIndex]}</p>
+                                      </div>
+                                    </div>
                                   </div>
                                 </div>
                               ))}
-                              {isAsking && (
-                                <div className="flex justify-start">
-                                  <div className="bg-white p-4 rounded-2xl border border-indigo-50 flex gap-1.5 animate-pulse">
-                                    <div className="w-1 h-1 bg-indigo-200 rounded-full"></div>
-                                    <div className="w-1 h-1 bg-indigo-300 rounded-full"></div>
-                                    <div className="w-1 h-1 bg-indigo-400 rounded-full"></div>
-                                  </div>
-                                </div>
-                              )}
-                              <div ref={chatEndRef} />
-                            </div>
-
-                            <div className="relative flex gap-2">
-                              <input
-                                type="text"
-                                value={followUpQuery}
-                                onChange={(e) => setFollowUpQuery(e.target.value)}
-                                onKeyPress={(e) => e.key === 'Enter' && handleAskAI(q)}
-                                placeholder={isRecognizing ? "正在听..." : "输入语法疑问..."}
-                                className={`flex-1 py-4 px-5 bg-white rounded-2xl border-none text-[13px] font-bold shadow-lg transition-all ${isRecognizing ? 'ring-2 ring-indigo-500' : ''}`}
-                              />
-                              <button 
-                                onClick={() => handleAskAI(q)} 
-                                disabled={!followUpQuery.trim() || isAsking}
-                                className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${!followUpQuery.trim() || isAsking ? 'bg-gray-100 text-gray-300' : 'bg-indigo-600 text-white active:scale-90'}`}
-                              >
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 12h14M12 5l7 7-7 7"/></svg>
-                              </button>
                             </div>
                           </div>
-                        )}
+                        </div>
                       </div>
-                    );
-                  })}
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <h4 className="text-[11px] font-black text-gray-400 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 bg-violet-500 rounded-full"></span> 历史错题记录
+              </h4>
+              {history.map((q, idx) => (
+                <div key={idx} className="bg-white p-6 rounded-[28px] border border-gray-100 shadow-sm">
+                  <div className="flex justify-between items-center mb-4">
+                    <div className="flex gap-2">
+                      <span className="px-3 py-1 bg-indigo-50 text-indigo-600 text-[10px] font-black rounded-lg border border-indigo-100">#{q.grammarPoint}</span>
+                      <span className={`px-2 py-1 text-[10px] font-black rounded-lg border transition-colors ${getDifficultyColor(q.difficulty)}`}>{q.difficulty || '中等'}</span>
+                    </div>
+                    <span className="text-[10px] text-gray-400 font-medium">{new Date(q.timestamp).toLocaleDateString()}</span>
+                  </div>
+                  <p className="text-sm text-gray-800 font-bold mb-4 leading-relaxed">{q.question}</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {q.options.map((opt, i) => (
+                      <div key={i} className={`p-3 rounded-xl text-[13px] border ${i === q.answerIndex ? 'bg-green-50 border-green-100 text-green-700 font-bold' : i === q.userAnswerIndex ? 'bg-red-50 border-red-100 text-red-700' : 'bg-gray-50 border-gray-50 text-gray-400'}`}>
+                        {String.fromCharCode(65 + i)}. {opt}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ))}
             </div>
-          )
-        )}
-      </div>
-
-      {/* 单题删除确认框 */}
-      {singleDeleteConfirm.isOpen && (
-        <div className="fixed inset-0 z-[400] flex items-center justify-center bg-black/40 backdrop-blur-sm p-6 animate-fadeIn">
-          <div className="bg-white w-full max-w-sm rounded-[40px] p-8 shadow-2xl">
-            <div className="text-center mb-6">
-              <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl">🗑️</div>
-              <h3 className="text-xl font-black text-gray-900">移除此题？</h3>
-              <p className="text-xs text-gray-400 mt-2 font-medium">题目将从{singleDeleteConfirm.type === 'details' ? '错题集' : '收藏本'}中删除。</p>
-            </div>
-            <div className="flex flex-col gap-3">
-              <button onClick={confirmDelete} className="w-full py-4.5 bg-red-600 text-white rounded-2xl font-black active:scale-95 transition-all">确认删除</button>
-              <button onClick={() => setSingleDeleteConfirm({ isOpen: false, item: null, type: null })} className="w-full py-4.5 bg-gray-100 text-gray-500 rounded-2xl font-bold active:scale-95 transition-all">取消</button>
-            </div>
-          </div>
-        </div>
+          )}
+        </main>
       )}
 
-      <style>{`
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        .animate-fadeIn { animation: fadeIn 0.3s ease-out forwards; }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-      `}</style>
+      <footer className="h-10 flex items-center justify-center opacity-20 pointer-events-none sticky bottom-0">
+        <div className="flex gap-1.5">
+          {[1,2,3].map(i => <div key={i} className="w-1.5 h-1.5 bg-indigo-200 rounded-full"></div>)}
+        </div>
+      </footer>
     </div>
   );
 };
