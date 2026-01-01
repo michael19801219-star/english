@@ -2,8 +2,10 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Question, Difficulty, ChatMessage, WrongQuestion } from "../types";
 
-// 获取当前有效的 API Key
+// 优先级：本地手动输入的 Key > 环境变量
 const getActiveApiKey = () => {
+  const localKey = localStorage.getItem('user_custom_gemini_key');
+  if (localKey && localKey.startsWith('AIza')) return localKey;
   return process.env.API_KEY || (window as any).process?.env?.API_KEY || "";
 };
 
@@ -16,20 +18,17 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
     const errorStr = JSON.stringify(error).toLowerCase();
     const errorMsg = error.message?.toLowerCase() || "";
     
-    // 识别密钥失效或过期 (HTTP 400)
+    // 识别密钥失效或过期 (HTTP 400/401/403)
     if (
       errorStr.includes('expired') || 
       errorStr.includes('invalid') || 
       errorStr.includes('key_invalid') ||
       errorMsg.includes('expired') ||
-      errorMsg.includes('invalid')
+      errorMsg.includes('invalid') ||
+      errorStr.includes('400') ||
+      errorStr.includes('401')
     ) {
       throw new Error("KEY_EXPIRED");
-    }
-
-    // 识别实体未找到
-    if (errorStr.includes('requested entity was not found') || errorMsg.includes('not found')) {
-      throw new Error("KEY_NOT_FOUND");
     }
 
     // 识别配额限制 (HTTP 429)
@@ -39,8 +38,7 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
                         errorMsg.includes('429');
 
     if (isQuotaError && retries > 0) {
-      const waitTime = (4 - retries) * 3000 + Math.random() * 2000;
-      console.warn(`[API] 频率受限，${Math.round(waitTime/1000)}s 后重试...`);
+      const waitTime = (4 - retries) * 2000 + Math.random() * 1000;
       await delay(waitTime);
       return withRetry(fn, retries - 1);
     }
@@ -75,18 +73,13 @@ export const generateGrammarQuestions = async (
   difficulty: Difficulty
 ): Promise<Question[]> => {
   return withRetry(async () => {
-    const ai = new GoogleGenAI({ apiKey: getActiveApiKey() });
-    const pointsDesc = targetPoints.length > 0 ? `专项考点：${targetPoints.join('、')}。` : "涵盖高考英语核心考点。";
+    const key = getActiveApiKey();
+    if (!key) throw new Error("KEY_MISSING");
     
-    const prompt = `你是一位经验丰富的高考英语命题专家。
-    任务：生成 ${count} 道符合高考大纲要求的英语语法填空（单项选择形式）题目。
-    难度：${difficulty}。
-    侧重考点：${pointsDesc}
-    要求：
-    1. 题干背景贴近高中生活或国际新闻，语言地道。
-    2. 干扰项设计要具有典型性。
-    3. 解析中包含中文翻译、核心考点说明及解题技巧。
-    返回标准 JSON 数组。`;
+    const ai = new GoogleGenAI({ apiKey: key });
+    const pointsDesc = targetPoints.length > 0 ? `考点：${targetPoints.join('、')}。` : "涵盖高中考纲。";
+    
+    const prompt = `你是高考命题组长。生成 ${count} 道英语语法单选题。难度：${difficulty}。${pointsDesc}`;
 
     const response = await ai.models.generateContent({
       model: TARGET_MODEL,
@@ -94,7 +87,7 @@ export const generateGrammarQuestions = async (
       config: {
         responseMimeType: "application/json",
         responseSchema: SCHEMA,
-        temperature: 0.75
+        temperature: 0.8
       }
     });
     return JSON.parse(response.text || "[]");
@@ -108,13 +101,12 @@ export const askFollowUpQuestion = async (
 ): Promise<string> => {
   return withRetry(async () => {
     const ai = new GoogleGenAI({ apiKey: getActiveApiKey() });
-    const contextPrompt = `题目：${questionContext.question}\n正确答案选项：${questionContext.options[questionContext.answerIndex]}\n解析：${questionContext.explanation}\n学生问题：${userQuery}\n请用老师的口吻简明扼要地解答。`;
     const response = await ai.models.generateContent({
       model: TARGET_MODEL,
-      contents: contextPrompt,
+      contents: `题目：${questionContext.question}\n问题：${userQuery}`,
       config: { temperature: 0.5 }
     });
-    return response.text || "解析生成中...";
+    return response.text || "正在思考...";
   });
 };
 
@@ -124,12 +116,9 @@ export const getGrammarDeepDive = async (
 ): Promise<{ lecture: string; mistakeAnalysis: string; tips: string[] }> => {
   return withRetry(async () => {
     const ai = new GoogleGenAI({ apiKey: getActiveApiKey() });
-    const prompt = `深度解析高考考点：${pointName}。参考错题：${wrongQuestions.slice(0, 1).map(q => q.question).join(' ')}。
-    要求：全部中文返回。`;
-    
     const response = await ai.models.generateContent({
       model: TARGET_MODEL,
-      contents: prompt,
+      contents: `解析考点：${pointName}`,
       config: {
         responseMimeType: "application/json",
         responseSchema: {

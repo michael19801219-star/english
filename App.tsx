@@ -18,33 +18,50 @@ const App: React.FC = () => {
   const [errorType, setErrorType] = useState<'RPM' | 'KEY_EXPIRED' | 'KEY_MISSING'>('RPM');
   const [reviewInitialTab, setReviewInitialTab] = useState<'summary' | 'details'>('summary');
   const [isUsingPersonalKey, setIsUsingPersonalKey] = useState(false);
+  
+  // 用于手动输入的 Key
+  const [inputKey, setInputKey] = useState('');
 
   useEffect(() => {
     const saved = localStorage.getItem('gaokao_stats_v2');
     if (saved) setUserStats(JSON.parse(saved));
     
+    // 初始化检查 Key 状态
     const checkKeyStatus = async () => {
-      if ((window as any).aistudio?.hasSelectedApiKey) {
+      const localKey = localStorage.getItem('user_custom_gemini_key');
+      if (localKey) {
+        setIsUsingPersonalKey(true);
+        setInputKey(localKey);
+      } else if ((window as any).aistudio?.hasSelectedApiKey) {
         try {
           const has = await (window as any).aistudio.hasSelectedApiKey();
           setIsUsingPersonalKey(has);
-        } catch (e) {
-          console.warn("Key check failed", e);
-        }
+        } catch (e) { console.warn(e); }
       }
     };
     checkKeyStatus();
   }, []);
+
+  const handleSaveInputKey = () => {
+    if (inputKey.trim().startsWith('AIza')) {
+      localStorage.setItem('user_custom_gemini_key', inputKey.trim());
+      setIsUsingPersonalKey(true);
+      setShowQuotaModal(false);
+      alert("API Key 已更新，现在可以开始训练了！");
+    } else {
+      alert("请输入有效的 Gemini API Key (以 AIza 开头)");
+    }
+  };
 
   const handleOpenSelectKey = async () => {
     if ((window as any).aistudio?.openSelectKey) {
       await (window as any).aistudio.openSelectKey();
       setIsUsingPersonalKey(true);
       setShowQuotaModal(false);
-      // 成功触发后强制回到首页刷新状态
-      setView(AppState.HOME);
     } else {
-      window.open('https://ai.google.dev/gemini-api/docs/billing', '_blank');
+      // 如果不在 AI Studio 环境，则显示手动输入界面
+      setErrorType('KEY_MISSING');
+      setShowQuotaModal(true);
     }
   };
 
@@ -56,26 +73,21 @@ const App: React.FC = () => {
       setQuestions(newQuestions);
       setView(AppState.QUIZ);
     } catch (error: any) {
-      console.error("App Logic Catch Error:", error);
+      console.error("Logic Error:", error);
       const msg = error.message;
-      
-      if (msg === "KEY_EXPIRED" || msg === "KEY_NOT_FOUND") {
+      if (msg === "KEY_EXPIRED" || msg === "KEY_NOT_FOUND" || msg === "KEY_MISSING") {
         setErrorType('KEY_EXPIRED');
-        setShowQuotaModal(true);
-      } else if (msg === "KEY_MISSING") {
-        setErrorType('KEY_MISSING');
         setShowQuotaModal(true);
       } else if (msg === "QUOTA_EXCEEDED") {
         setErrorType('RPM');
         setShowQuotaModal(true);
       } else {
-        // 对于未识别的复杂 JSON 错误，进行内容匹配
         const strErr = JSON.stringify(error).toLowerCase();
-        if (strErr.includes('expired') || strErr.includes('invalid')) {
+        if (strErr.includes('expired') || strErr.includes('key')) {
           setErrorType('KEY_EXPIRED');
           setShowQuotaModal(true);
         } else {
-          alert(`系统错误：${msg || '未知异常'}`);
+          alert(`出题失败: ${msg || '网络抖动'}`);
         }
       }
       setView(AppState.HOME);
@@ -86,22 +98,18 @@ const App: React.FC = () => {
     let score = 0;
     const wrongPoints: string[] = [];
     const newWrongEntries: WrongQuestion[] = [];
-
     userAnswers.forEach((ans, idx) => {
-      if (ans === questions[idx].answerIndex) {
-        score++;
-      } else {
+      if (ans === questions[idx].answerIndex) score++;
+      else {
         wrongPoints.push(questions[idx].grammarPoint);
         newWrongEntries.push({ ...questions[idx], userAnswerIndex: ans, timestamp: Date.now() });
       }
     });
-
     const newStats = { ...userStats };
     wrongPoints.forEach(pt => { newStats.wrongCounts[pt] = (newStats.wrongCounts[pt] || 0) + 1; });
     newStats.wrongHistory = [...newWrongEntries, ...newStats.wrongHistory].slice(0, 50);
     setUserStats(newStats);
     localStorage.setItem('gaokao_stats_v2', JSON.stringify(newStats));
-    
     setResults({ score, total: questions.length, answers: userAnswers, questions, wrongGrammarPoints: Array.from(new Set(wrongPoints)) });
     setView(AppState.RESULT);
   };
@@ -110,12 +118,12 @@ const App: React.FC = () => {
     <div className="min-h-screen bg-gray-50 flex flex-col max-w-md mx-auto relative overflow-hidden shadow-2xl">
       {/* 状态指示器 */}
       <div 
-        onClick={handleOpenSelectKey}
-        className={`absolute top-4 left-1/2 -translate-x-1/2 z-50 px-3 py-1.5 rounded-full backdrop-blur-md border flex items-center gap-2 cursor-pointer transition-all active:scale-95 ${isUsingPersonalKey ? 'bg-green-500/90 text-white border-white/20' : 'bg-white/80 text-gray-500 border-gray-100 shadow-sm'}`}
+        onClick={() => setShowQuotaModal(true)}
+        className={`absolute top-4 left-1/2 -translate-x-1/2 z-50 px-3 py-1.5 rounded-full backdrop-blur-md border flex items-center gap-2 cursor-pointer transition-all active:scale-95 ${isUsingPersonalKey ? 'bg-indigo-600 text-white border-indigo-400' : 'bg-white/80 text-gray-500 border-gray-100 shadow-sm'}`}
       >
-        <span className={`w-1.5 h-1.5 rounded-full ${isUsingPersonalKey ? 'bg-white animate-pulse' : 'bg-gray-300'}`}></span>
+        <span className={`w-1.5 h-1.5 rounded-full ${isUsingPersonalKey ? 'bg-green-400 animate-pulse' : 'bg-gray-300'}`}></span>
         <span className="text-[10px] font-black uppercase tracking-widest">
-          {isUsingPersonalKey ? 'Personal Mode ON' : 'Public Mode'}
+          {isUsingPersonalKey ? '个人密钥已激活' : '公共模式 (额度受限)'}
         </span>
         <span className="text-xs">⚙️</span>
       </div>
@@ -124,43 +132,58 @@ const App: React.FC = () => {
       {view === AppState.LOADING && <LoadingView message={loadingMsg} onCancel={() => setView(AppState.HOME)} />}
       {view === AppState.QUIZ && <QuizView questions={questions} onFinish={finishQuiz} onCancel={() => setView(AppState.HOME)} onQuotaError={() => { setErrorType('RPM'); setShowQuotaModal(true); }} />}
       {view === AppState.RESULT && results && <ResultView results={results} onRestart={() => setView(AppState.HOME)} onConsolidate={() => results && results.wrongGrammarPoints.length > 0 && startQuiz(10, '中等', results.wrongGrammarPoints)} />}
-      {view === AppState.REVIEW && <ReviewView history={userStats.wrongHistory} onBack={() => setView(AppState.HOME)} onClear={() => { if(confirm('确定清空所有错题记录吗？')){setUserStats({wrongCounts:{}, wrongHistory:[]}); localStorage.removeItem('gaokao_stats_v2');}}} onStartQuiz={(p) => startQuiz(10, '中等', [p])} initialTab={reviewInitialTab} />}
+      {view === AppState.REVIEW && <ReviewView history={userStats.wrongHistory} onBack={() => setView(AppState.HOME)} onClear={() => { if(confirm('确定清空所有记录吗？')){setUserStats({wrongCounts:{}, wrongHistory:[]}); localStorage.removeItem('gaokao_stats_v2');}}} onStartQuiz={(p) => startQuiz(10, '中等', [p])} initialTab={reviewInitialTab} />}
 
-      {/* 统一的错误/密钥引导弹窗 */}
+      {/* 增强型密钥手动输入弹窗 */}
       {showQuotaModal && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-md p-6 animate-fadeIn">
           <div className="bg-white w-full max-w-xs rounded-[40px] p-8 shadow-2xl text-center border border-gray-100">
             <div className="text-5xl mb-6">
               {errorType === 'KEY_EXPIRED' ? '🔑' : '⏳'}
             </div>
-            <h3 className="text-xl font-black text-gray-900 mb-2 leading-tight">
-              {errorType === 'KEY_EXPIRED' ? 'API 密钥已过期' : '当前公共流量过大'}
+            <h3 className="text-xl font-black text-gray-900 mb-2">
+              {errorType === 'KEY_EXPIRED' ? '更新 API Key' : '公共流量受限'}
             </h3>
             
-            <p className="text-xs text-gray-400 mb-8 leading-relaxed px-2 font-medium">
-              {errorType === 'KEY_EXPIRED' 
-                ? '您当前使用的密钥已失效。请点击下方按钮，在弹出窗口中粘贴您新申请的 API Key。' 
-                : '公共通道已满负荷。建议立即切换至您的个人专用 API Key 获得无限次练习机会。'}
+            <p className="text-xs text-gray-400 mb-6 px-2 font-medium">
+              请在下方粘贴您申请的 Gemini API Key。使用个人 Key 可享受无限次练习。
             </p>
 
-            <div className="flex flex-col gap-3">
+            <div className="space-y-4">
+              <input 
+                type="text"
+                placeholder="粘贴 AIzaSy... 开头的密钥"
+                value={inputKey}
+                onChange={(e) => setInputKey(e.target.value)}
+                className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-2xl text-sm font-mono focus:border-indigo-500 transition-all outline-none"
+              />
+              
               <button 
-                onClick={handleOpenSelectKey}
-                className="w-full py-4.5 bg-indigo-600 text-white rounded-2xl font-black shadow-xl shadow-indigo-100 active:scale-95 transition-all flex items-center justify-center gap-2"
+                onClick={handleSaveInputKey}
+                className="w-full py-4.5 bg-indigo-600 text-white rounded-2xl font-black shadow-xl shadow-indigo-100 active:scale-95 transition-all"
               >
-                <span>立即更换/应用个人 Key</span>
+                保存并启动应用
               </button>
-              <button 
-                onClick={() => setShowQuotaModal(false)}
-                className="w-full py-3 text-gray-300 font-bold text-xs"
-              >
-                稍后再说
-              </button>
+              
+              <div className="flex justify-center gap-4 pt-2">
+                <button 
+                  onClick={() => setShowQuotaModal(false)}
+                  className="text-gray-300 font-bold text-xs"
+                >
+                  取消
+                </button>
+                <button 
+                  onClick={() => { localStorage.removeItem('user_custom_gemini_key'); setIsUsingPersonalKey(false); window.location.reload(); }}
+                  className="text-red-300 font-bold text-xs"
+                >
+                  重置 Key
+                </button>
+              </div>
             </div>
             
             <div className="mt-8 pt-4 border-t border-gray-50">
               <p className="text-[9px] text-gray-300 leading-tight">
-                * 粘贴后请确保点击确定。<br/>您的新 Key: AIzaSy...CHF00Cs
+                * 您的 Key 将仅保存在本地浏览器缓存中。
               </p>
             </div>
           </div>
