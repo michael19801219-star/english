@@ -23,14 +23,18 @@ const App: React.FC = () => {
     const saved = localStorage.getItem('gaokao_stats_v2');
     if (saved) setUserStats(JSON.parse(saved));
     
-    // 检查是否已经选择了个人 Key
-    const checkKey = async () => {
+    // 检查是否有选定的 API Key
+    const checkKeyStatus = async () => {
       if ((window as any).aistudio?.hasSelectedApiKey) {
-        const has = await (window as any).aistudio.hasSelectedApiKey();
-        setIsUsingPersonalKey(has);
+        try {
+          const has = await (window as any).aistudio.hasSelectedApiKey();
+          setIsUsingPersonalKey(has);
+        } catch (e) {
+          console.warn("Key status check failed", e);
+        }
       }
     };
-    checkKey();
+    checkKeyStatus();
   }, []);
 
   const saveStats = (wrongPoints: string[], wrongQuestions: WrongQuestion[]) => {
@@ -45,19 +49,20 @@ const App: React.FC = () => {
 
   const handleOpenSelectKey = async () => {
     if ((window as any).aistudio?.openSelectKey) {
+      // 触发弹窗
       await (window as any).aistudio.openSelectKey();
+      // 遵循 Race Condition 缓解规则：触发后立即认为成功并继续
       setIsUsingPersonalKey(true);
       setShowQuotaModal(false);
-      alert("已切换至个人 Key 模式，请重新开始训练。");
+      alert("已尝试应用新 Key，请重新启动训练！");
     } else {
       window.open('https://ai.google.dev/gemini-api/docs/billing', '_blank');
-      alert("当前环境不支持在线选 Key，请检查 Vercel 环境变量设置。");
     }
   };
 
   const startQuiz = async (count: number, difficulty: Difficulty, points: string[]) => {
     setView(AppState.LOADING);
-    setLoadingMsg(`AI 正在为你生成 ${difficulty} 难度的试卷...`);
+    setLoadingMsg(`正在为您调取 ${difficulty} 难度的高考试题...`);
     try {
       const newQuestions = await generateGrammarQuestions(count, points, difficulty);
       setQuestions(newQuestions);
@@ -72,14 +77,11 @@ const App: React.FC = () => {
       } else if (errorMsg === "KEY_INVALID_OR_NOT_FOUND") {
         setErrorType('PERSONAL');
         setShowQuotaModal(true);
-      } else if (errorMsg === "MODEL_NOT_FOUND") {
-        setErrorType('MODEL');
-        setShowQuotaModal(true);
       } else if (errorMsg === "QUOTA_EXCEEDED" || errorMsg.includes("429")) {
         setErrorType('RPM');
         setShowQuotaModal(true);
       } else {
-        alert(`生成失败: ${errorMsg}`);
+        alert(`系统繁忙: ${errorMsg}`);
       }
       setView(AppState.HOME);
     }
@@ -117,9 +119,11 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col max-w-md mx-auto relative overflow-hidden shadow-2xl">
+      {/* 顶部个人状态标签 */}
       {isUsingPersonalKey && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 px-3 py-1 bg-green-500/90 backdrop-blur-md text-white text-[9px] font-black rounded-full shadow-lg flex items-center gap-1.5 border border-white/20">
-          <span className="animate-pulse">●</span> 个人模式已开启
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-1.5 bg-black/80 backdrop-blur-xl text-white text-[10px] font-black rounded-full shadow-2xl border border-white/20 flex items-center gap-2">
+          <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse"></span>
+          <span>专属通道已开启 (不限流量)</span>
         </div>
       )}
 
@@ -150,52 +154,47 @@ const App: React.FC = () => {
         <ReviewView 
           history={userStats.wrongHistory} 
           onBack={() => setView(AppState.HOME)} 
-          onClear={() => { if(confirm('清空？')){setUserStats({wrongCounts:{}, wrongHistory:[]}); localStorage.removeItem('gaokao_stats_v2');}}} 
+          onClear={() => { if(confirm('确定清空所有错题记录吗？')){setUserStats({wrongCounts:{}, wrongHistory:[]}); localStorage.removeItem('gaokao_stats_v2');}}} 
           onStartQuiz={(p) => startQuiz(10, '中等', [p])}
           initialTab={reviewInitialTab}
         />
       )}
 
+      {/* 配额错误/引导弹窗 */}
       {showQuotaModal && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm p-6 animate-fadeIn">
-          <div className="bg-white w-full max-w-xs rounded-[32px] p-8 shadow-2xl text-center">
-            <div className="text-4xl mb-4">
-              {errorType === 'RPM' ? '⏳' : errorType === 'PERSONAL' ? '🔑' : '🚫'}
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-md p-6 animate-fadeIn">
+          <div className="bg-white w-full max-w-xs rounded-[32px] p-8 shadow-2xl text-center border border-gray-100">
+            <div className="text-5xl mb-6">
+              {errorType === 'RPM' ? '🔋' : errorType === 'PERSONAL' ? '🔐' : '📡'}
             </div>
-            <h3 className="text-xl font-black text-gray-900 mb-2">
-              {errorType === 'RPM' ? '请求太频繁啦' : errorType === 'PERSONAL' ? 'Key 已失效' : '暂时无法连接'}
+            <h3 className="text-xl font-black text-gray-900 mb-2 leading-tight">
+              {errorType === 'RPM' ? '公共流量过载' : 'Key 需要重新验证'}
             </h3>
             
-            <div className="text-left space-y-3 mb-6">
-              {errorType === 'RPM' && (
-                <div className="p-3 bg-indigo-50 rounded-xl border border-indigo-100">
-                   <p className="text-[11px] font-black text-indigo-700 mb-1">配额已耗尽 (RPD/RPM)</p>
-                   <p className="text-[10px] text-indigo-600/70 leading-relaxed">公共 API Key 今日配额已用完，或分钟限制触发。Google 每日下午 3-4 点左右重置配额。</p>
-                </div>
-              )}
-              
-              <div className="p-3 bg-amber-50 rounded-xl border border-amber-100">
-                 <p className="text-[11px] font-bold text-amber-700 mb-1">推荐方案</p>
-                 <p className="text-[10px] text-amber-600/70 leading-relaxed">
-                   如果您有自己的 Google Cloud 项目，可以点击下方按钮选择个人 Key，彻底解决配额不足问题。
-                 </p>
-              </div>
-            </div>
+            <p className="text-xs text-gray-500 mb-8 leading-relaxed px-2">
+              目前公共通道使用人数过多，建议使用您刚才申请的 **个人 API Key** 获得无限次练习机会。
+            </p>
 
             <div className="flex flex-col gap-3">
               <button 
                 onClick={handleOpenSelectKey}
-                className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black shadow-lg shadow-indigo-100 active:scale-95 transition-all"
+                className="w-full py-4.5 bg-indigo-600 text-white rounded-2xl font-black shadow-xl shadow-indigo-100 active:scale-95 transition-all flex items-center justify-center gap-2"
               >
-                选择个人 API Key (无限量)
+                <span>使用个人 API Key</span>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
               </button>
               <button 
                 onClick={() => setShowQuotaModal(false)}
                 className="w-full py-3 text-gray-400 font-bold text-sm"
               >
-                稍后再试
+                暂时放弃
               </button>
             </div>
+            
+            <p className="mt-6 text-[9px] text-gray-300 font-medium">
+              * 您可以在弹出的界面中粘贴您的 Key: <br/>
+              AIzaSy...CHF00Cs
+            </p>
           </div>
         </div>
       )}
