@@ -7,13 +7,12 @@ interface QuizViewProps {
   questions: Question[];
   onFinish: (answers: number[]) => void;
   onCancel: () => void;
-  onQuotaError: () => void;
   onToggleSave: (q: Question, userAnswerIndex?: number) => void;
   onAnswerSubmitted: (q: Question, ans: number) => void;
   savedHistory: WrongQuestion[];
 }
 
-const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel, onQuotaError, onToggleSave, onAnswerSubmitted, savedHistory }) => {
+const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel, onToggleSave, onAnswerSubmitted, savedHistory }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [userAnswers, setUserAnswers] = useState<number[]>([]);
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
@@ -43,7 +42,7 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel, onQu
       const response = await askFollowUpQuestion(questions[currentIndex], chatHistory, query);
       setChatHistory(prev => [...prev, { role: 'model', content: response }]);
     } catch (err: any) {
-      onQuotaError();
+      alert('AI 答疑暂时无法响应，请稍后再试。');
     } finally {
       setIsAsking(false);
     }
@@ -71,7 +70,6 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel, onQu
 
   return (
     <div className="flex-1 flex flex-col h-screen relative bg-gray-50 overflow-hidden">
-      {/* 退出确认弹窗 - 使用极高层级 */}
       {isExiting && (
         <div className="fixed inset-0 z-[500] flex items-center justify-center bg-black/70 backdrop-blur-md p-6">
           <div className="bg-white w-full max-w-sm rounded-[40px] p-10 shadow-2xl text-center animate-fadeIn">
@@ -86,7 +84,6 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel, onQu
         </div>
       )}
 
-      {/* 核心修改：悬浮固定按钮容器。放在外部独立层级，避免受 transform 影响 */}
       <div className="fixed bottom-10 left-0 right-0 flex justify-center z-[400] pointer-events-none px-6">
         <div className="pointer-events-auto max-w-md w-full flex justify-center">
           {showFeedback ? (
@@ -109,7 +106,6 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel, onQu
         </div>
       </div>
 
-      {/* 内容包裹层 - 移除容器级的 transform 动画，改用内容级的 */}
       <div className="flex-1 flex flex-col p-5 overflow-hidden">
         <header className="mb-4 flex-shrink-0 animate-fadeIn">
           <div className="flex justify-between items-center mb-3 min-h-[40px]">
@@ -124,7 +120,6 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel, onQu
           </div>
         </header>
 
-        {/* pb-48 留出足够的空间，确保最后的内容不会被悬浮按钮遮挡 */}
         <main className="flex-1 overflow-y-auto pr-1 flex flex-col no-scrollbar pb-48 animate-fadeIn">
           <div className="bg-white rounded-[28px] p-6 shadow-sm border border-gray-100 mb-4 relative overflow-hidden flex-shrink-0">
             <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500 opacity-30"></div>
