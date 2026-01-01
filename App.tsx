@@ -9,26 +9,12 @@ import LoadingView from './components/LoadingView';
 import ReviewView from './components/ReviewView';
 import StatsView from './components/StatsView';
 
-// 扩展 window 接口以识别 AI Studio 特有方法
-// Fix: Define AIStudio interface to match environmental definitions and fix declaration merge errors
-declare global {
-  interface AIStudio {
-    hasSelectedApiKey: () => Promise<boolean>;
-    openSelectKey: () => Promise<void>;
-  }
-
-  interface Window {
-    aistudio: AIStudio;
-  }
-}
-
 const App: React.FC = () => {
   const [view, setView] = useState<AppState>(AppState.HOME);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [results, setResults] = useState<QuizResults | null>(null);
   const [loadingMsg, setLoadingMsg] = useState('');
   const [quizStartTime, setQuizStartTime] = useState<number>(0);
-  const [isApiKeyReady, setIsApiKeyReady] = useState(false);
   
   const [userStats, setUserStats] = useState<UserStats>(() => {
     const saved = localStorage.getItem('gaokao_stats_v5');
@@ -60,24 +46,6 @@ const App: React.FC = () => {
   const [reviewInitialTab, setReviewInitialTab] = useState<'summary' | 'details' | 'saved'>('summary');
   const [isProcessing, setIsProcessing] = useState(false);
   const [clearConfirm, setClearConfirm] = useState<{ isOpen: boolean; type: 'details' | 'saved' | null }>({ isOpen: false, type: null });
-
-  // 检查 API Key 状态
-  useEffect(() => {
-    const checkKey = async () => {
-      try {
-        const hasKey = await window.aistudio.hasSelectedApiKey();
-        setIsApiKeyReady(hasKey);
-      } catch (e) {
-        setIsApiKeyReady(true); // 如果环境不支持，默认跳过
-      }
-    };
-    checkKey();
-  }, []);
-
-  const handleSelectKey = async () => {
-    await window.aistudio.openSelectKey();
-    setIsApiKeyReady(true);
-  };
 
   useEffect(() => {
     localStorage.setItem('gaokao_stats_v5', JSON.stringify(userStats));
@@ -141,13 +109,6 @@ const App: React.FC = () => {
 
   const startQuiz = useCallback(async (count: number, difficulty: Difficulty, points: string[]) => {
     if (isProcessing) return;
-    
-    // 如果没有选择 Key，强制弹出选择框
-    const hasKey = await window.aistudio.hasSelectedApiKey();
-    if (!hasKey) {
-      await handleSelectKey();
-    }
-
     setIsProcessing(true);
     setView(AppState.LOADING);
     setLoadingMsg(`AI 正在定制专属题目，请稍候...`);
@@ -162,13 +123,7 @@ const App: React.FC = () => {
       setQuizStartTime(Date.now());
       setView(AppState.QUIZ);
     } catch (error: any) {
-      const errorMsg = error.message || "";
-      if (errorMsg.includes("Requested entity was not found")) {
-        alert("项目配置已失效，请重新选择您的 API 项目。");
-        handleSelectKey();
-      } else {
-        alert("出题遇到状况，请检查网络或点击顶部信号图标切换 API 项目。");
-      }
+      alert("出题遇到状况，请检查网络后再试。");
       setView(AppState.HOME);
     } finally {
       setIsProcessing(false);
@@ -224,8 +179,6 @@ const App: React.FC = () => {
           onGoToReview={handleGoToReview}
           onGoToStats={handleGoToStats}
           onUpdateStats={handleUpdateStats}
-          apiKeyReady={isApiKeyReady}
-          onSelectKey={handleSelectKey}
         />
       )}
       {view === AppState.LOADING && <LoadingView message={loadingMsg} onCancel={() => setView(AppState.HOME)} />}
@@ -234,10 +187,7 @@ const App: React.FC = () => {
           questions={questions} 
           onFinish={finishQuiz} 
           onCancel={() => setView(AppState.HOME)} 
-          onQuotaError={() => {
-            alert("当前项目额度不足，建议点击主页信号图标切换 API 项目。");
-            handleSelectKey();
-          }}
+          onQuotaError={() => alert("当前 AI 忙碌，请稍后再试。")}
           onAnswerSubmitted={handleAnswerSubmitted}
           onToggleSave={toggleSaveQuestion}
           savedHistory={userStats.savedHistory}
@@ -260,25 +210,6 @@ const App: React.FC = () => {
       )}
       {view === AppState.STATS && (
         <StatsView stats={userStats} onBack={() => setView(AppState.HOME)} />
-      )}
-
-      {/* API Key 激活屏幕 */}
-      {!isApiKeyReady && view === AppState.HOME && (
-        <div className="fixed inset-0 z-[500] bg-white flex flex-col items-center justify-center p-8 text-center animate-fadeIn">
-          <div className="w-24 h-24 bg-indigo-50 rounded-[40px] flex items-center justify-center text-5xl mb-8 animate-pulse">🔑</div>
-          <h2 className="text-2xl font-black text-gray-900 mb-4">激活 AI 核心引擎</h2>
-          <p className="text-gray-500 text-sm mb-10 leading-relaxed font-medium">
-            为了确保流畅的出题体验，请点击下方按钮选择您的 API 项目。<br/>
-            <span className="text-indigo-600 font-bold">(建议选择已关联结算帐户的项目)</span>
-          </p>
-          <button 
-            onClick={handleSelectKey}
-            className="w-full py-5 bg-indigo-600 text-white rounded-[28px] font-black text-lg shadow-xl shadow-indigo-100 active:scale-95 transition-all"
-          >
-            立即选择并进入
-          </button>
-          <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" className="mt-6 text-xs text-gray-400 underline font-bold">查看计费说明文档</a>
-        </div>
       )}
 
       {clearConfirm.isOpen && (
