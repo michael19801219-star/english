@@ -11,15 +11,11 @@ import StatsView from './components/StatsView';
 
 // 扩展 window 接口以识别 AI Studio 特有方法
 declare global {
-  interface AIStudio {
-    hasSelectedApiKey: () => Promise<boolean>;
-    outputApiKey: () => string; // 假设环境提供获取当前 Key 的方法
-    openSelectKey: () => Promise<void>;
-  }
-
   interface Window {
-    // Fix: Removed readonly to avoid "All declarations of 'aistudio' must have identical modifiers" error
-    aistudio: AIStudio;
+    readonly aistudio: {
+      hasSelectedApiKey: () => Promise<boolean>;
+      openSelectKey: () => Promise<void>;
+    };
   }
 }
 
@@ -31,7 +27,9 @@ const App: React.FC = () => {
   const [quizStartTime, setQuizStartTime] = useState<number>(0);
   const [isApiKeyReady, setIsApiKeyReady] = useState(false);
   
-  // 详细的 API 状态信息
+  // 用于强制触发组件刷新的版本号
+  const [keyVersion, setKeyVersion] = useState(0);
+  
   const [apiInfo, setApiInfo] = useState({
     fingerprint: '未关联',
     uid: 'ID_NULL',
@@ -66,16 +64,20 @@ const App: React.FC = () => {
     };
   });
 
+  // Persist user stats to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('gaokao_stats_v5', JSON.stringify(userStats));
+  }, [userStats]);
+
   const [reviewInitialTab, setReviewInitialTab] = useState<'summary' | 'details' | 'saved'>('summary');
   const [isProcessing, setIsProcessing] = useState(false);
   const [clearConfirm, setClearConfirm] = useState<{ isOpen: boolean; type: 'details' | 'saved' | null }>({ isOpen: false, type: null });
 
-  // 增强版指纹提取
+  // 增强版指纹提取：直接从 process.env.API_KEY 读取
   const refreshApiInfo = useCallback(() => {
     const key = process.env.API_KEY || '';
     const isPlaceholder = !key || !key.startsWith('AIza');
     
-    // 生成一个简易的 UID 用于区分项目
     let hash = 0;
     for (let i = 0; i < key.length; i++) {
       hash = ((hash << 5) - hash) + key.charCodeAt(i);
@@ -93,7 +95,7 @@ const App: React.FC = () => {
     });
   }, []);
 
-  // 检查 API Key 状态
+  // 每次 keyVersion 改变时，重新检查并刷新 API 信息
   useEffect(() => {
     const checkKey = async () => {
       try {
@@ -101,23 +103,21 @@ const App: React.FC = () => {
         setIsApiKeyReady(hasKey);
         refreshApiInfo();
       } catch (e) {
-        setIsApiKeyReady(true);
+        setIsApiKeyReady(!!process.env.API_KEY);
         refreshApiInfo();
       }
     };
     checkKey();
-  }, [refreshApiInfo]);
+  }, [keyVersion, refreshApiInfo]);
 
   const handleSelectKey = async () => {
-    // Fix: Remove artificial delay after openSelectKey as per SDK instructions to avoid race conditions
-    await window.aistudio.openSelectKey();
-    refreshApiInfo();
-    setIsApiKeyReady(true);
+    try {
+      await window.aistudio.openSelectKey();
+      setKeyVersion(v => v + 1);
+    } catch (e) {
+      console.error("Select key error", e);
+    }
   };
-
-  useEffect(() => {
-    localStorage.setItem('gaokao_stats_v5', JSON.stringify(userStats));
-  }, [userStats]);
 
   const handleUpdateStats = (newStats: UserStats) => {
     setUserStats(newStats);
@@ -132,53 +132,78 @@ const App: React.FC = () => {
     setView(AppState.STATS);
   };
 
+  // Fix: Implement missing handleAnswerSubmitted handler
   const handleAnswerSubmitted = (question: Question, userAnswerIndex: number) => {
-    if (userAnswerIndex !== question.answerIndex) {
-      setUserStats(prev => {
-        const point = question.grammarPoint;
-        const newCounts = { ...prev.wrongCounts, [point]: (prev.wrongCounts[point] || 0) + 1 };
-        const exists = prev.wrongHistory.some(q => q.question === question.question);
-        if (exists) return prev;
-        const wrongEntry: WrongQuestion = { ...question, userAnswerIndex, timestamp: Date.now() };
-        return { ...prev, wrongCounts: newCounts, wrongHistory: [wrongEntry, ...prev.wrongHistory].slice(0, 200) };
-      });
-    }
+    if (userAnswerIndex === question.answerIndex) return;
+
+    setUserStats(prev => {
+      const point = question.grammarPoint || '通用语法';
+      const newWrongCounts = { ...prev.wrongCounts };
+      newWrongCounts[point] = (newWrongCounts[point] || 0) + 1;
+
+      const newWrong: WrongQuestion = {
+        ...question,
+        userAnswerIndex,
+        timestamp: Date.now()
+      };
+
+      return {
+        ...prev,
+        wrongCounts: newWrongCounts,
+        wrongHistory: [newWrong, ...prev.wrongHistory].slice(0, 100)
+      };
+    });
   };
 
+  // Fix: Implement missing toggleSaveQuestion handler
   const toggleSaveQuestion = (question: Question, userAnswerIndex: number) => {
     setUserStats(prev => {
       const isAlreadySaved = prev.savedHistory.some(q => q.question === question.question);
       if (isAlreadySaved) {
-        return { ...prev, savedHistory: prev.savedHistory.filter(q => q.question !== question.question) };
+        return {
+          ...prev,
+          savedHistory: prev.savedHistory.filter(q => q.question !== question.question)
+        };
       } else {
-        const saveEntry: WrongQuestion = { ...question, userAnswerIndex, timestamp: Date.now() };
-        return { ...prev, savedHistory: [saveEntry, ...prev.savedHistory].slice(0, 100) };
+        const newSaved: WrongQuestion = {
+          ...question,
+          userAnswerIndex,
+          timestamp: Date.now()
+        };
+        return {
+          ...prev,
+          savedHistory: [newSaved, ...prev.savedHistory]
+        };
       }
     });
   };
 
+  // Fix: Implement missing handleDeleteWrong handler
   const handleDeleteWrong = (timestamp: number) => {
-    setUserStats(prev => {
-      const itemToDelete = prev.wrongHistory.find(q => q.timestamp === timestamp);
-      if (!itemToDelete) return prev;
-      const point = itemToDelete.grammarPoint;
-      const newCounts = { ...prev.wrongCounts };
-      if (newCounts[point] > 0) {
-        newCounts[point]--;
-        if (newCounts[point] === 0) delete newCounts[point];
-      }
-      return { ...prev, wrongHistory: prev.wrongHistory.filter(q => q.timestamp !== timestamp), wrongCounts: newCounts };
-    });
+    setUserStats(prev => ({
+      ...prev,
+      wrongHistory: prev.wrongHistory.filter(q => q.timestamp !== timestamp)
+    }));
   };
 
+  // Fix: Implement missing handleDeleteSaved handler
   const handleDeleteSaved = (timestamp: number) => {
-    setUserStats(prev => ({ ...prev, savedHistory: prev.savedHistory.filter(q => q.timestamp !== timestamp) }));
+    setUserStats(prev => ({
+      ...prev,
+      savedHistory: prev.savedHistory.filter(q => q.timestamp !== timestamp)
+    }));
   };
 
   const startQuiz = useCallback(async (count: number, difficulty: Difficulty, points: string[]) => {
     if (isProcessing) return;
     
-    const hasKey = await window.aistudio.hasSelectedApiKey();
+    let hasKey = false;
+    try {
+      hasKey = await window.aistudio.hasSelectedApiKey();
+    } catch (e) {
+      hasKey = !!process.env.API_KEY;
+    }
+
     if (!hasKey) {
       await handleSelectKey();
       return;
@@ -200,12 +225,12 @@ const App: React.FC = () => {
     } catch (error: any) {
       const errorMsg = error.message || "";
       if (errorMsg.includes("Requested entity was not found")) {
-        alert("项目配置无效或已被重置。请尝试重新关联您的 API 项目。");
+        alert("项目配置无效。请尝试点击【信号图标】重新关联您的 API 项目。");
         setIsApiKeyReady(false);
       } else if (errorMsg.includes("429")) {
-        alert("请求过于频繁（免费项目限制）。请稍等 1 分钟后再试，或者更换付费项目。");
+        alert("请求过于频繁。免费项目每分钟仅支持少量请求，请稍后再试。");
       } else {
-        alert("出题遇到状况，请检查网络或点击主页左上角信号图标切换 API 项目。");
+        alert("出题遇到状况，请尝试更换另一个 API 项目。");
       }
       setView(AppState.HOME);
     } finally {
@@ -274,7 +299,7 @@ const App: React.FC = () => {
           onFinish={finishQuiz} 
           onCancel={() => setView(AppState.HOME)} 
           onQuotaError={() => {
-            alert("当前项目额度或频率不足（429错误）。建议休息一会或更换 API 项目。");
+            alert("当前项目频率受限，请更换项目或稍后再试。");
             handleSelectKey();
           }}
           onAnswerSubmitted={handleAnswerSubmitted}
@@ -301,35 +326,15 @@ const App: React.FC = () => {
         <StatsView stats={userStats} onBack={() => setView(AppState.HOME)} />
       )}
 
-      {/* 引导激活屏幕：专门针对 AI Studio 的选择难题 */}
+      {/* 引导激活屏幕 */}
       {!isApiKeyReady && view === AppState.HOME && (
         <div className="fixed inset-0 z-[500] bg-white flex flex-col items-center justify-center p-8 text-center animate-fadeIn overflow-y-auto">
           <div className="w-20 h-20 bg-indigo-50 rounded-[30px] flex items-center justify-center text-4xl mb-6 shadow-inner animate-pulse">🛰️</div>
           <h2 className="text-2xl font-black text-gray-900 mb-2">连接 AI 核心</h2>
           <p className="text-gray-400 text-[13px] mb-8 leading-relaxed px-4 font-medium">
-            为了启动出题服务，请关联一个有效的 API 项目。您可以自由选择免费或付费项目。
+            为了启动出题服务，请关联一个有效的 API 项目。
           </p>
           
-          <div className="bg-indigo-50/50 border border-indigo-100 rounded-[28px] p-6 mb-8 text-left space-y-4">
-            <h4 className="text-xs font-black text-indigo-900 uppercase tracking-widest flex items-center gap-2">
-              <span className="w-2 h-2 bg-indigo-500 rounded-full"></span> 操作指引
-            </h4>
-            <div className="space-y-3">
-              <div className="flex gap-3">
-                <span className="flex-shrink-0 w-5 h-5 bg-indigo-600 text-white rounded-full text-[10px] flex items-center justify-center font-black">1</span>
-                <p className="text-[12px] text-gray-600 font-bold leading-tight">点击下方按钮打开对话框</p>
-              </div>
-              <div className="flex gap-3">
-                <span className="flex-shrink-0 w-5 h-5 bg-indigo-600 text-white rounded-full text-[10px] flex items-center justify-center font-black">2</span>
-                <p className="text-[12px] text-gray-600 font-bold leading-tight">如果在导入里看到项目，请<span className="text-indigo-600">关闭小窗口</span>回到主列表勾选它。</p>
-              </div>
-              <div className="flex gap-3">
-                <span className="flex-shrink-0 w-5 h-5 bg-indigo-600 text-white rounded-full text-[10px] flex items-center justify-center font-black">3</span>
-                <p className="text-[12px] text-gray-600 font-bold leading-tight">点击【确认/完成】即可开始练习。</p>
-              </div>
-            </div>
-          </div>
-
           <button 
             onClick={handleSelectKey}
             className="w-full py-5 bg-indigo-600 text-white rounded-[24px] font-black text-lg shadow-xl shadow-indigo-100 active:scale-95 transition-all mb-6"
@@ -337,9 +342,12 @@ const App: React.FC = () => {
             去关联 API 项目
           </button>
           
-          <p className="text-[10px] text-gray-300 font-bold uppercase tracking-widest">
-            * 免费项目每分钟请求次数有限
-          </p>
+          <div className="p-5 bg-gray-50 rounded-2xl text-left">
+            <p className="text-[10px] text-gray-500 font-bold mb-2 uppercase tracking-widest">操作贴士</p>
+            <p className="text-[12px] text-gray-400 leading-relaxed font-medium">
+              如果您在对话框中看不到项目，请确保已在 AI Studio 创建了项目并开启了 API。
+            </p>
+          </div>
         </div>
       )}
 

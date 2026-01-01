@@ -3,9 +3,9 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { Question, Difficulty, ChatMessage, WrongQuestion } from "../types";
 
 /**
- * 严格锁定 2.5 Lite 模型 ('gemini-flash-lite-latest')
+ * 使用推荐的 gemini-3-flash-preview 模型进行题目生成和答疑
  */
-const TEXT_MODEL = 'gemini-flash-lite-latest';
+const TEXT_MODEL = 'gemini-3-flash-preview';
 
 const SCHEMA = {
   type: Type.ARRAY,
@@ -44,7 +44,7 @@ async function silentRetry<T>(fn: () => Promise<T>, attempts = 2): Promise<T> {
  */
 const getAIInstance = () => {
   // Fix: Strictly follow SDK guidelines for initializing GoogleGenAI with process.env.API_KEY
-  return new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+  return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
 
 export const generateGrammarQuestions = async (
