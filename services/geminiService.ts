@@ -7,12 +7,12 @@ import { Question, Difficulty, ChatMessage, WrongQuestion } from "../types";
  */
 const TEXT_MODEL = 'gemini-flash-lite-latest';
 
+// 简化的 Schema，移除 id 让 AI 更专心于内容生成
 const SCHEMA = {
   type: Type.ARRAY,
   items: {
     type: Type.OBJECT,
     properties: {
-      id: { type: Type.STRING },
       question: { type: Type.STRING },
       translation: { type: Type.STRING }, 
       options: { type: Type.ARRAY, items: { type: Type.STRING } },
@@ -21,9 +21,28 @@ const SCHEMA = {
       grammarPoint: { type: Type.STRING },
       difficulty: { type: Type.STRING }
     },
-    required: ["id", "question", "translation", "options", "answerIndex", "explanation", "grammarPoint", "difficulty"]
+    required: ["question", "translation", "options", "answerIndex", "explanation", "grammarPoint", "difficulty"]
   }
 };
+
+/**
+ * 内部静默重试函数，不触发 UI 提示，提高系统稳定性
+ */
+async function silentRetry<T>(fn: () => Promise<T>, attempts = 2): Promise<T> {
+  let lastError: any;
+  for (let i = 0; i <= attempts; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastError = e;
+      if (i < attempts) {
+        // 短暂延迟后重试
+        await new Promise(resolve => setTimeout(resolve, 800 * (i + 1)));
+      }
+    }
+  }
+  throw lastError;
+}
 
 export const generateGrammarQuestions = async (
   count: number, 
@@ -31,35 +50,41 @@ export const generateGrammarQuestions = async (
   difficulty: Difficulty,
   onProgress?: (msg: string) => void
 ): Promise<Question[]> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const pointsDesc = targetPoints.length > 0 ? `重点考察：${targetPoints.join('、')}。` : "涵盖高考核心考点。";
-  
-  if (onProgress) onProgress("AI 正在构思题目...");
+  return silentRetry(async () => {
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const pointsDesc = targetPoints.length > 0 ? `重点考察：${targetPoints.join('、')}。` : "涵盖高考核心考点。";
+    
+    if (onProgress) onProgress("AI 正在构思题目...");
 
-  try {
     const response = await ai.models.generateContent({
       model: TEXT_MODEL,
-      contents: `生成 ${count} 道单项填空练习题。难度：${difficulty}。${pointsDesc}`,
+      contents: `Generate ${count} multiple-choice English grammar questions for Chinese High School Students. Difficulty: ${difficulty}. ${pointsDesc}`,
       config: {
-        systemInstruction: `你是一位高考英语名师。
-        1. 题目语境真实，符合高考逻辑。
-        2. 解析需包含结构分析和关键词提示。
-        3. 必须为题目提供准确的【中文翻译】。
-        4. 仅返回 JSON 数据，严禁包含 Markdown 标记。`,
+        systemInstruction: `You are a master English teacher. 
+        Return a JSON array of objects. 
+        Each object must have: question, translation (Chinese), options (4 strings), answerIndex (0-3), explanation (Chinese), grammarPoint, difficulty.
+        Output ONLY raw JSON. No markdown tags.`,
         responseMimeType: "application/json",
         responseSchema: SCHEMA,
-        temperature: 0.4
+        temperature: 0.5
       }
     });
     
     const text = response.text || "[]";
-    const data = JSON.parse(text);
-    if (!Array.isArray(data) || data.length === 0) throw new Error("EMPTY_DATA");
-    return data;
-  } catch (e) {
-    console.error("Generate error:", e);
-    throw new Error("GENERATION_FAILED");
-  }
+    try {
+      const data = JSON.parse(text);
+      if (!Array.isArray(data) || data.length === 0) throw new Error("EMPTY_DATA");
+      
+      // 在前端补充 ID，确保唯一性
+      return data.map((q: any, index: number) => ({
+        ...q,
+        id: `gen_${Date.now()}_${index}`
+      }));
+    } catch (e) {
+      console.error("Parse error:", text);
+      throw new Error("FORMAT_ERROR");
+    }
+  });
 };
 
 export const askFollowUpQuestion = async (
@@ -67,36 +92,33 @@ export const askFollowUpQuestion = async (
   history: ChatMessage[],
   userQuery: string
 ): Promise<string> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  try {
+  return silentRetry(async () => {
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const response = await ai.models.generateContent({
       model: TEXT_MODEL,
-      contents: `针对题目的追问："${userQuery}"`,
+      contents: `Context Question: ${questionContext.question}. Student query: "${userQuery}"`,
       config: { 
-        systemInstruction: `你是英语助教。针对题目: ${questionContext.question}，回答学生疑问。`,
+        systemInstruction: `You are an English tutor helping a high school student. Explain simply in Chinese.`,
         temperature: 0.7 
       }
     });
-    return response.text || "老师正在组织语言，请再问一遍。";
-  } catch (e) {
-    console.error("Ask error:", e);
-    return "暂时无法连接 AI 助教，请稍后再试。";
-  }
+    return response.text || "抱歉，请再试一次。";
+  }, 1);
 };
 
 export const getGrammarDeepDive = async (
   pointName: string,
   wrongQuestions: WrongQuestion[]
 ): Promise<{ lecture: string; mistakeAnalysis: string; tips: string[] }> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const context = wrongQuestions.slice(0, 2).map(q => q.question).join('|');
-  
-  try {
+  return silentRetry(async () => {
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const context = wrongQuestions.slice(0, 2).map(q => q.question).join('|');
+    
     const response = await ai.models.generateContent({
       model: TEXT_MODEL,
-      contents: `生成“${pointName}”的精讲。错题案例：${context}`,
+      contents: `Analyze grammar point: "${pointName}". Examples: ${context}`,
       config: {
-        systemInstruction: `输出 JSON 复习讲义：lecture(讲解), mistakeAnalysis(易错点), tips(3个技巧数组)。`,
+        systemInstruction: `Output JSON: lecture (text), mistakeAnalysis (text), tips (array of 3 strings). Use Chinese.`,
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -107,16 +129,9 @@ export const getGrammarDeepDive = async (
           },
           required: ["lecture", "mistakeAnalysis", "tips"]
         },
-        temperature: 0.2
+        temperature: 0.3
       }
     });
     return JSON.parse(response.text || "{}");
-  } catch (e) {
-    console.error("Deep dive error:", e);
-    return {
-      lecture: "暂时无法生成详细讲义。",
-      mistakeAnalysis: "请参考错题集的解析内容。",
-      tips: ["多看例句", "分析句子成分", "背诵核心搭配"]
-    };
-  }
+  }, 1);
 };
