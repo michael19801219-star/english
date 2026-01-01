@@ -8,12 +8,10 @@ interface HomeViewProps {
   onGoToReview: (tab?: 'summary' | 'details' | 'saved') => void;
   onGoToStats: () => void;
   onUpdateStats: (newStats: UserStats) => void;
-  onOpenKeyModal: () => void;
-  isUsingPersonalKey: boolean;
 }
 
 const HomeView: React.FC<HomeViewProps> = ({ 
-  onStart, stats, onGoToReview, onGoToStats, onUpdateStats, onOpenKeyModal, isUsingPersonalKey
+  onStart, stats, onGoToReview, onGoToStats, onUpdateStats
 }) => {
   const [count, setCount] = useState(10);
   const [difficulty, setDifficulty] = useState<Difficulty>('中等');
@@ -95,17 +93,6 @@ const HomeView: React.FC<HomeViewProps> = ({
           <div className="flex flex-col">
             <div className="flex items-center gap-2 mb-2">
               <span className="text-[10px] font-black text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-md uppercase">周琮钦专属定制版</span>
-              {/* 模式切换胶囊 - 醒目设计 */}
-              <button 
-                onClick={onOpenKeyModal}
-                className={`flex items-center gap-1.5 px-3 py-1 rounded-full shadow-sm border transition-all active:scale-95 ${isUsingPersonalKey ? 'bg-indigo-600 border-indigo-500' : 'bg-white border-slate-100'}`}
-              >
-                <div className={`w-1.5 h-1.5 rounded-full ${isUsingPersonalKey ? 'bg-green-400 animate-pulse' : 'bg-slate-300'}`}></div>
-                <span className={`text-[9px] font-black uppercase tracking-tight ${isUsingPersonalKey ? 'text-white' : 'text-slate-400'}`}>
-                  {isUsingPersonalKey ? 'Personal Mode' : 'Public Mode'}
-                </span>
-                <span className="text-[12px] ml-0.5">⚙️</span>
-              </button>
             </div>
             
             <h1 className="text-[30px] font-black text-gray-900 leading-[1.1]">英语语法<br/><span className="text-indigo-600">通关大师</span></h1>

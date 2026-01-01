@@ -253,8 +253,8 @@ const ReviewView: React.FC<ReviewViewProps> = ({
                             <div className="p-5 bg-green-50/50 rounded-2xl border border-green-100/30">
                               <h6 className="text-[10px] font-black text-green-700 uppercase mb-2">提分技巧</h6>
                               <ul className="space-y-2">
-                                {/* Fix for line 292: Safely access tips using optional chaining to ensure correct type inference */}
-                                {diveData.tips?.map((tip: string, i: number) => (
+                                {/* Fix type unknown by casting diveData.tips to string[] explicitly */}
+                                {(diveData.tips as string[])?.map((tip: string, i: number) => (
                                   <li key={i} className="text-[13px] text-green-900 leading-relaxed font-bold flex gap-2">
                                     <span className="text-green-400">#</span> {tip}
                                   </li>
