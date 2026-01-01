@@ -22,6 +22,7 @@ const App: React.FC = () => {
   const [loadingMsg, setLoadingMsg] = useState('');
   const [userStats, setUserStats] = useState<UserStats>({ wrongCounts: {}, wrongHistory: [], savedHistory: [] });
   const [showQuotaModal, setShowQuotaModal] = useState(false);
+  const [showSyncModal, setShowSyncModal] = useState(false);
   const [reviewInitialTab, setReviewInitialTab] = useState<'summary' | 'details' | 'saved'>('summary');
   const [isUsingPersonalKey, setIsUsingPersonalKey] = useState(false);
   const [inputKey, setInputKey] = useState('');
@@ -176,6 +177,46 @@ const App: React.FC = () => {
     }
   };
 
+  const exportBackup = () => {
+    const dataStr = JSON.stringify(userStats, null, 2);
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `grammar_master_backup_${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const importBackup = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const content = e.target?.result as string;
+        const parsed = JSON.parse(content);
+        if (parsed.wrongCounts && parsed.wrongHistory && parsed.savedHistory) {
+          if (window.confirm('导入备份将覆盖当前所有练习记录，确定吗？')) {
+            setUserStats(parsed);
+            alert('数据导入成功！');
+            setShowSyncModal(false);
+          }
+        } else {
+          alert('无效的备份文件：数据格式不符合要求。');
+        }
+      } catch (err) {
+        alert('解析备份文件失败，请确保文件是有效的 JSON 格式。');
+      }
+    };
+    reader.readAsText(file);
+    // 重置 input 以允许再次选择同一文件
+    event.target.value = '';
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col max-w-md mx-auto relative overflow-hidden shadow-2xl">
       {view === AppState.HOME && (
@@ -185,6 +226,7 @@ const App: React.FC = () => {
           onGoToReview={(tab) => { setReviewInitialTab(tab as any || 'summary'); setView(AppState.REVIEW); }} 
           isUsingPersonalKey={isUsingPersonalKey}
           onOpenQuotaModal={() => setShowQuotaModal(true)}
+          onOpenSyncModal={() => setShowSyncModal(true)}
         />
       )}
       
@@ -224,6 +266,7 @@ const App: React.FC = () => {
         />
       )}
 
+      {/* API Key Modal */}
       {showQuotaModal && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-md p-6 animate-fadeIn">
           <div className="bg-white w-full max-w-xs rounded-[40px] p-8 shadow-2xl text-center">
@@ -269,6 +312,43 @@ const App: React.FC = () => {
               className="text-gray-400 font-bold text-xs active:opacity-50"
             >
               取消
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Backup & Sync Modal */}
+      {showSyncModal && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-md p-6 animate-fadeIn">
+          <div className="bg-white w-full max-w-xs rounded-[40px] p-8 shadow-2xl text-center">
+            <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-3xl flex items-center justify-center text-3xl mx-auto mb-4">🔄</div>
+            <h3 className="text-xl font-black mb-2 text-gray-900">数据备份与同步</h3>
+            <p className="text-xs text-gray-400 mb-8 font-medium leading-relaxed">通过手动下载/上传备份文件，在不同设备间同步你的练习记录与收藏。</p>
+            
+            <div className="flex flex-col gap-3">
+              <button 
+                onClick={exportBackup}
+                className="w-full py-4.5 bg-indigo-600 text-white rounded-2xl font-black shadow-lg shadow-indigo-100 active:scale-95 transition-all flex items-center justify-center gap-2"
+              >
+                <span>📤</span> 导出备份文件
+              </button>
+              
+              <label className="w-full py-4.5 bg-white border-2 border-gray-100 text-indigo-600 rounded-2xl font-black active:bg-gray-50 transition-all flex items-center justify-center gap-2 cursor-pointer">
+                <input 
+                  type="file" 
+                  accept=".json" 
+                  className="hidden" 
+                  onChange={importBackup}
+                />
+                <span>📥</span> 导入备份文件
+              </label>
+            </div>
+            
+            <button 
+              onClick={() => setShowSyncModal(false)} 
+              className="mt-8 text-gray-400 font-bold text-xs active:opacity-50"
+            >
+              关闭
             </button>
           </div>
         </div>
