@@ -134,6 +134,16 @@ const ReviewView: React.FC<ReviewViewProps> = ({
     }
   };
 
+  // 难度标签颜色逻辑
+  const getDifficultyStyles = (diff: string) => {
+    switch(diff) {
+      case '简单': return 'bg-emerald-50 text-emerald-600 border-emerald-100';
+      case '中等': return 'bg-indigo-50 text-indigo-600 border-indigo-100';
+      case '较难': return 'bg-amber-50 text-amber-600 border-amber-100';
+      default: return 'bg-gray-50 text-gray-500 border-gray-100';
+    }
+  };
+
   const renderQuestionCard = (q: WrongQuestion, idx: number) => {
     const isAiOpen = activeAiTimestamp === q.timestamp;
     const currentChatHistory = cardChatHistories[q.timestamp] || [];
@@ -143,7 +153,14 @@ const ReviewView: React.FC<ReviewViewProps> = ({
       <div key={`${q.timestamp}-${idx}`} className="bg-white p-6 rounded-[28px] border border-gray-100 shadow-sm relative animate-fadeIn mb-4">
         <div className="flex justify-between items-start mb-4">
           <div className="flex flex-col gap-2">
-            <span className="px-3 py-1 bg-indigo-50 text-indigo-600 text-[10px] font-black rounded-lg border border-indigo-100 w-fit">#{q.grammarPoint}</span>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="px-2.5 py-1 bg-indigo-50 text-indigo-600 text-[10px] font-black rounded-lg border border-indigo-100">
+                #{q.grammarPoint}
+              </span>
+              <span className={`px-2.5 py-1 text-[10px] font-black rounded-lg border ${getDifficultyStyles(q.difficulty)}`}>
+                难度: {q.difficulty}
+              </span>
+            </div>
             <span className="text-[10px] text-gray-400 font-medium">{new Date(q.timestamp).toLocaleDateString()}</span>
           </div>
           

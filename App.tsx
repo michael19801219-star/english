@@ -65,18 +65,11 @@ const App: React.FC = () => {
     localStorage.setItem('gaokao_stats_v3', JSON.stringify(userStats));
   }, [userStats]);
 
-  // 数据清洗：确保考点名称属于标准集合
   const normalizePoint = (rawPoint: string): string => {
     if (GRAMMAR_POINTS.includes(rawPoint)) return rawPoint;
-    
-    // 简单模糊匹配逻辑
     for (const standard of GRAMMAR_POINTS) {
-      if (rawPoint.includes(standard) || standard.includes(rawPoint)) {
-        return standard;
-      }
+      if (rawPoint.includes(standard) || standard.includes(rawPoint)) return standard;
     }
-    
-    // 关键字映射
     if (rawPoint.includes('时态') || rawPoint.includes('语态')) return '时态语态';
     if (rawPoint.includes('虚拟') || rawPoint.includes('语气')) return '情态动词与虚拟语气';
     if (rawPoint.includes('定语')) return '定语从句';
@@ -84,35 +77,54 @@ const App: React.FC = () => {
     if (rawPoint.includes('非谓语')) return '非谓语动词';
     if (rawPoint.includes('介词') || rawPoint.includes('冠词')) return '介词冠词';
     if (rawPoint.includes('代词') || rawPoint.includes('形容词') || rawPoint.includes('副词')) return '代词与形容词副词';
-    
-    return GRAMMAR_POINTS[0]; // 兜底返回第一个
+    return GRAMMAR_POINTS[0];
   };
 
-  const toggleSaveQuestion = (q: Question, userAnswerIndex?: number) => {
-    setUserStats(prev => {
-      const isSaved = prev.savedHistory.some(s => s.id === q.id || s.question === q.question);
-      if (isSaved) {
-        return { ...prev, savedHistory: prev.savedHistory.filter(s => s.question !== q.question && s.id !== q.id) };
-      } else {
-        const newSaved: WrongQuestion = {
-          ...q,
-          userAnswerIndex: userAnswerIndex ?? q.answerIndex,
-          timestamp: Date.now()
-        };
-        return { ...prev, savedHistory: [newSaved, ...prev.savedHistory].slice(0, 100) };
-      }
+  const startQuiz = async (count: number, difficulty: Difficulty, points: string[]) => {
+    setView(AppState.LOADING);
+    setLoadingMsg(`正在调取最新高考考点...`);
+    try {
+      const newQuestions = await generateGrammarQuestions(count, points, difficulty);
+      setQuestions(newQuestions);
+      setView(AppState.QUIZ);
+    } catch (error: any) {
+      setView(AppState.HOME);
+      setShowQuotaModal(true);
+    }
+  };
+
+  // 新增：历史题库训练逻辑
+  const startHistoryQuiz = (sourceType: 'wrong' | 'saved', count: number, difficulty: Difficulty, points: string[]) => {
+    const source = sourceType === 'wrong' ? userStats.wrongHistory : userStats.savedHistory;
+    
+    // 1. 过滤
+    let filtered = source.filter(q => {
+      const matchesPoint = points.length === 0 || points.includes(q.grammarPoint);
+      const matchesDiff = difficulty === '随机' || q.difficulty === difficulty;
+      return matchesPoint && matchesDiff;
     });
+
+    if (filtered.length === 0) {
+      alert(`当前选中的${sourceType === 'wrong' ? '错题' : '收藏'}库中没有符合条件的题目，请更换筛选条件或增加练习量。`);
+      return;
+    }
+
+    // 2. 打乱并截取
+    const shuffled = [...filtered].sort(() => Math.random() - 0.5);
+    const finalQuestions = shuffled.slice(0, count);
+    
+    setQuestions(finalQuestions);
+    setView(AppState.QUIZ);
   };
 
   const handleAnswerSubmitted = (q: Question, ans: number) => {
     const isCorrect = ans === q.answerIndex;
     const today = new Date().toISOString().split('T')[0];
-    const pt = normalizePoint(q.grammarPoint); // 关键：标准化考点名称
+    const pt = normalizePoint(q.grammarPoint);
 
     setUserStats(prev => {
       const newDailyProgress = { ...prev.dailyProgress };
       newDailyProgress[today] = (newDailyProgress[today] || 0) + 1;
-
       const newPointAttempts = { ...prev.pointAttempts };
       newPointAttempts[pt] = (newPointAttempts[pt] || 0) + 1;
 
@@ -127,24 +139,13 @@ const App: React.FC = () => {
       if (!isCorrect) {
         const newCounts = { ...prev.wrongCounts };
         newCounts[pt] = (newCounts[pt] || 0) + 1;
-        
         const alreadyInHistory = prev.wrongHistory.some(h => h.question === q.question);
         let newHistory = prev.wrongHistory;
-        
         if (!alreadyInHistory) {
-          const newWrong: WrongQuestion = {
-            ...q,
-            userAnswerIndex: ans,
-            timestamp: Date.now()
-          };
+          const newWrong: WrongQuestion = { ...q, userAnswerIndex: ans, timestamp: Date.now() };
           newHistory = [newWrong, ...prev.wrongHistory].slice(0, 100);
         }
-        
-        newState = {
-          ...newState,
-          wrongCounts: newCounts,
-          wrongHistory: newHistory
-        };
+        newState = { ...newState, wrongCounts: newCounts, wrongHistory: newHistory };
       }
       return newState;
     });
@@ -168,31 +169,24 @@ const App: React.FC = () => {
   };
 
   const removeSavedQuestion = (timestamp: number) => {
+    setUserStats(prev => ({ ...prev, savedHistory: prev.savedHistory.filter(h => h.timestamp !== timestamp) }));
+  };
+
+  // Added missing clearWrongHistory function
+  const clearWrongHistory = () => {
     setUserStats(prev => ({
       ...prev,
-      savedHistory: prev.savedHistory.filter(h => h.timestamp !== timestamp)
+      wrongHistory: [],
+      wrongCounts: {}
     }));
   };
 
-  const clearWrongHistory = () => {
-    setUserStats(prev => ({ ...prev, wrongCounts: {}, wrongHistory: [] }));
-  };
-
+  // Added missing clearSavedHistory function
   const clearSavedHistory = () => {
-    setUserStats(prev => ({ ...prev, savedHistory: [] }));
-  };
-
-  const startQuiz = async (count: number, difficulty: Difficulty, points: string[]) => {
-    setView(AppState.LOADING);
-    setLoadingMsg(`正在调取最新高考考点...`);
-    try {
-      const newQuestions = await generateGrammarQuestions(count, points, difficulty);
-      setQuestions(newQuestions);
-      setView(AppState.QUIZ);
-    } catch (error: any) {
-      setView(AppState.HOME);
-      setShowQuotaModal(true);
-    }
+    setUserStats(prev => ({
+      ...prev,
+      savedHistory: []
+    }));
   };
 
   const finishQuiz = (userAnswers: number[]) => {
@@ -202,13 +196,7 @@ const App: React.FC = () => {
       if (ans === questions[idx].answerIndex) score++;
       else wrongPoints.push(normalizePoint(questions[idx].grammarPoint));
     });
-    setResults({ 
-      score, 
-      total: questions.length, 
-      answers: userAnswers, 
-      questions, 
-      wrongGrammarPoints: Array.from(new Set(wrongPoints)) 
-    });
+    setResults({ score, total: questions.length, answers: userAnswers, questions, wrongGrammarPoints: Array.from(new Set(wrongPoints)) });
     setView(AppState.RESULT);
   };
 
@@ -261,6 +249,7 @@ const App: React.FC = () => {
       {view === AppState.HOME && (
         <HomeView 
           onStart={startQuiz} 
+          onStartHistory={startHistoryQuiz} // 传递新函数
           stats={userStats} 
           onGoToReview={(tab) => { setReviewInitialTab(tab as any || 'summary'); setView(AppState.REVIEW); }} 
           onGoToStats={() => setView(AppState.STATS)}
@@ -269,48 +258,34 @@ const App: React.FC = () => {
           onOpenSyncModal={() => setShowSyncModal(true)}
         />
       )}
-      
       {view === AppState.LOADING && <LoadingView message={loadingMsg} onCancel={() => setView(AppState.HOME)} />}
-      
       {view === AppState.QUIZ && (
         <QuizView 
           questions={questions} 
           onFinish={finishQuiz} 
           onCancel={() => setView(AppState.HOME)} 
           onQuotaError={() => setShowQuotaModal(true)}
-          onToggleSave={toggleSaveQuestion}
+          onToggleSave={(q, idx) => {
+            const isSaved = userStats.savedHistory.some(s => s.question === q.question);
+            if (isSaved) {
+              const target = userStats.savedHistory.find(s => s.question === q.question);
+              if (target) removeSavedQuestion(target.timestamp);
+            } else {
+              const newSaved: WrongQuestion = { ...q, userAnswerIndex: idx ?? q.answerIndex, timestamp: Date.now() };
+              setUserStats(prev => ({ ...prev, savedHistory: [newSaved, ...prev.savedHistory].slice(0, 100) }));
+            }
+          }}
           onAnswerSubmitted={handleAnswerSubmitted}
           savedHistory={userStats.savedHistory}
         />
       )}
-      
       {view === AppState.RESULT && results && (
-        <ResultView 
-          results={results} 
-          onRestart={() => setView(AppState.HOME)} 
-          onConsolidate={() => results.wrongGrammarPoints.length > 0 && startQuiz(10, '中等', results.wrongGrammarPoints)} 
-        />
+        <ResultView results={results} onRestart={() => setView(AppState.HOME)} onConsolidate={() => results.wrongGrammarPoints.length > 0 && startQuiz(10, '中等', results.wrongGrammarPoints)} />
       )}
-      
       {view === AppState.REVIEW && (
-        <ReviewView 
-          history={userStats.wrongHistory} 
-          savedHistory={userStats.savedHistory}
-          onBack={() => setView(AppState.HOME)} 
-          onClearWrong={clearWrongHistory}
-          onClearSaved={clearSavedHistory}
-          onStartQuiz={(p) => startQuiz(10, '中等', [p])} 
-          onRemoveWrong={removeWrongQuestion}
-          onRemoveSaved={removeSavedQuestion}
-          initialTab={reviewInitialTab} 
-        />
+        <ReviewView history={userStats.wrongHistory} savedHistory={userStats.savedHistory} onBack={() => setView(AppState.HOME)} onClearWrong={clearWrongHistory} onClearSaved={clearSavedHistory} onStartQuiz={(p) => startQuiz(10, '中等', [p])} onRemoveWrong={removeWrongQuestion} onRemoveSaved={removeSavedQuestion} initialTab={reviewInitialTab} />
       )}
-
-      {view === AppState.STATS && (
-        <StatsView stats={userStats} onBack={() => setView(AppState.HOME)} />
-      )}
-
-      {/* API Key Modal */}
+      {view === AppState.STATS && <StatsView stats={userStats} onBack={() => setView(AppState.HOME)} />}
       {showQuotaModal && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-md p-6 animate-fadeIn">
           <div className="bg-white w-full max-w-xs rounded-[40px] p-8 shadow-2xl text-center">
@@ -329,7 +304,6 @@ const App: React.FC = () => {
           </div>
         </div>
       )}
-
       {showSyncModal && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-md p-6 animate-fadeIn">
           <div className="bg-white w-full max-w-xs rounded-[40px] p-8 shadow-2xl text-center">

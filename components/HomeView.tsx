@@ -4,6 +4,7 @@ import { UserStats, Difficulty, GRAMMAR_POINTS } from '../types';
 
 interface HomeViewProps {
   onStart: (count: number, difficulty: Difficulty, points: string[]) => void;
+  onStartHistory: (source: 'wrong' | 'saved', count: number, difficulty: Difficulty, points: string[]) => void;
   stats: UserStats;
   onGoToReview: (tab?: 'summary' | 'details' | 'saved') => void;
   onGoToStats: () => void;
@@ -14,6 +15,7 @@ interface HomeViewProps {
 
 const HomeView: React.FC<HomeViewProps> = ({ 
   onStart, 
+  onStartHistory,
   stats, 
   onGoToReview, 
   onGoToStats,
@@ -21,6 +23,8 @@ const HomeView: React.FC<HomeViewProps> = ({
   onOpenQuotaModal,
   onOpenSyncModal
 }) => {
+  const [mode, setMode] = useState<'ai' | 'history'>('ai');
+  const [historySource, setHistorySource] = useState<'wrong' | 'saved'>('wrong');
   const [count, setCount] = useState(10);
   const [difficulty, setDifficulty] = useState<Difficulty>('中等');
   const [selectedPoints, setSelectedPoints] = useState<string[]>([]);
@@ -38,22 +42,35 @@ const HomeView: React.FC<HomeViewProps> = ({
   const hasWrongStats = sortedWrongEntries.length > 0;
   const topWrongPoint = hasWrongStats ? sortedWrongEntries[0][0] : null;
 
+  // 计算当前历史库中符合条件的题目数量（预览）
+  const getHistoryPreviewCount = () => {
+    const source = historySource === 'wrong' ? stats.wrongHistory : stats.savedHistory;
+    const filtered = source.filter(q => {
+      const matchesPoint = selectedPoints.length === 0 || selectedPoints.includes(q.grammarPoint);
+      const matchesDiff = difficulty === '随机' || q.difficulty === difficulty;
+      return matchesPoint && matchesDiff;
+    });
+    return filtered.length;
+  };
+
   return (
-    <div className="flex-1 flex flex-col p-6 overflow-y-auto animate-fadeIn pb-10 relative">
+    <div className="flex-1 flex flex-col p-6 overflow-y-auto animate-fadeIn pb-10 relative no-scrollbar">
       <div className="absolute top-[-80px] left-[-40px] w-72 h-72 bg-indigo-200 rounded-full blur-[90px] opacity-30 -z-10"></div>
       
-      {/* 状态栏图标区域 */}
+      {/* 顶部状态栏 */}
       <div className="flex justify-center items-center gap-2 mb-4">
-        <div 
-          onClick={onOpenQuotaModal}
-          className={`px-3 py-1.5 rounded-full backdrop-blur-md border flex items-center gap-2 cursor-pointer transition-all active:scale-95 ${isUsingPersonalKey ? 'bg-indigo-600 text-white border-indigo-400' : 'bg-white/80 text-gray-500 border-gray-100 shadow-sm'}`}
-        >
-          <span className={`w-1.5 h-1.5 rounded-full ${isUsingPersonalKey ? 'bg-green-400 animate-pulse' : 'bg-gray-300'}`}></span>
-          <span className="text-[10px] font-black uppercase tracking-widest">
-            {isUsingPersonalKey ? '密钥已激活' : '公共模式'}
-          </span>
-          <span className="text-xs">⚙️</span>
-        </div>
+        {mode === 'ai' && (
+          <div 
+            onClick={onOpenQuotaModal}
+            className={`px-3 py-1.5 rounded-full backdrop-blur-md border flex items-center gap-2 cursor-pointer transition-all active:scale-95 ${isUsingPersonalKey ? 'bg-indigo-600 text-white border-indigo-400' : 'bg-white/80 text-gray-500 border-gray-100 shadow-sm'}`}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${isUsingPersonalKey ? 'bg-green-400 animate-pulse' : 'bg-gray-300'}`}></span>
+            <span className="text-[10px] font-black uppercase tracking-widest">
+              {isUsingPersonalKey ? '密钥已激活' : '公共模式'}
+            </span>
+            <span className="text-xs">⚙️</span>
+          </div>
+        )}
 
         <div 
           onClick={onOpenSyncModal}
@@ -80,46 +97,54 @@ const HomeView: React.FC<HomeViewProps> = ({
         </div>
         
         <div className="flex gap-1.5">
-          <button 
-            onClick={onGoToStats}
-            className="bg-white/90 backdrop-blur-md p-3 rounded-[22px] shadow-sm border border-gray-100 flex flex-col items-center relative active:scale-90 transition-all"
-            title="学习数据"
-          >
-            <span className="text-xl">📊</span>
-            <span className="text-[8px] font-black text-gray-400 mt-1 uppercase tracking-widest">数据</span>
-          </button>
-
-          <button 
-            onClick={() => onGoToReview('saved')}
-            className="bg-white/90 backdrop-blur-md p-3 rounded-[22px] shadow-sm border border-gray-100 flex flex-col items-center relative active:scale-90 transition-all"
-            title="收藏本"
-          >
-            <span className="text-xl">⭐</span>
-            <span className="text-[8px] font-black text-gray-400 mt-1 uppercase tracking-widest">收藏</span>
-            {stats.savedHistory?.length > 0 && (
-              <span className="absolute -top-1 -right-1 bg-amber-500 text-white text-[8px] w-4 h-4 rounded-full flex items-center justify-center border border-white font-black">
-                {stats.savedHistory.length}
-              </span>
-            )}
-          </button>
-
-          <button 
-            onClick={() => onGoToReview('details')}
-            className="bg-white/90 backdrop-blur-md p-3 rounded-[22px] shadow-sm border border-gray-100 flex flex-col items-center relative active:scale-90 transition-all"
-            title="错题集"
-          >
-            <span className="text-xl">📕</span>
-            <span className="text-[8px] font-black text-gray-400 mt-1 uppercase tracking-widest">错题</span>
-            {stats.wrongHistory.length > 0 && (
-              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[8px] w-4 h-4 rounded-full flex items-center justify-center border border-white font-black">
-                {stats.wrongHistory.length}
-              </span>
-            )}
-          </button>
+          <button onClick={onGoToStats} className="bg-white/90 backdrop-blur-md p-3 rounded-[22px] shadow-sm border border-gray-100 flex flex-col items-center relative active:scale-90 transition-all"><span className="text-xl">📊</span><span className="text-[8px] font-black text-gray-400 mt-1 uppercase tracking-widest">数据</span></button>
+          <button onClick={() => onGoToReview('saved')} className="bg-white/90 backdrop-blur-md p-3 rounded-[22px] shadow-sm border border-gray-100 flex flex-col items-center relative active:scale-90 transition-all"><span className="text-xl">⭐</span><span className="text-[8px] font-black text-gray-400 mt-1 uppercase tracking-widest">收藏</span>{stats.savedHistory?.length > 0 && <span className="absolute -top-1 -right-1 bg-amber-500 text-white text-[8px] w-4 h-4 rounded-full flex items-center justify-center border border-white font-black">{stats.savedHistory.length}</span>}</button>
+          <button onClick={() => onGoToReview('details')} className="bg-white/90 backdrop-blur-md p-3 rounded-[22px] shadow-sm border border-gray-100 flex flex-col items-center relative active:scale-90 transition-all"><span className="text-xl">📕</span><span className="text-[8px] font-black text-gray-400 mt-1 uppercase tracking-widest">错题</span>{stats.wrongHistory.length > 0 && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[8px] w-4 h-4 rounded-full flex items-center justify-center border border-white font-black">{stats.wrongHistory.length}</span>}</button>
         </div>
       </header>
 
+      {/* 模式切换器 */}
+      <div className="mb-8 p-1.5 bg-gray-100/50 rounded-[28px] flex">
+        <button 
+          onClick={() => setMode('ai')}
+          className={`flex-1 py-4 px-4 rounded-[24px] text-xs font-black transition-all flex items-center justify-center gap-2 ${mode === 'ai' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400'}`}
+        >
+          <span>✨</span> AI 智能出题
+        </button>
+        <button 
+          onClick={() => setMode('history')}
+          className={`flex-1 py-4 px-4 rounded-[24px] text-xs font-black transition-all flex items-center justify-center gap-2 ${mode === 'history' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400'}`}
+        >
+          <span>🔄</span> 历史原题巩固
+        </button>
+      </div>
+
       <div className="space-y-8 flex-1">
+        {mode === 'history' && (
+          <section className="bg-amber-50/50 p-6 rounded-[36px] border border-amber-100 animate-fadeIn">
+            <h3 className="text-[11px] font-black text-amber-600 mb-5 uppercase tracking-[0.2em] flex items-center gap-2">
+              <span className="w-1.5 h-1.5 bg-amber-400 rounded-full"></span> 巩固来源
+            </h3>
+            <div className="grid grid-cols-2 gap-3">
+              <button 
+                onClick={() => setHistorySource('wrong')} 
+                className={`py-3.5 rounded-[20px] text-sm font-black transition-all flex items-center justify-center gap-2 ${historySource === 'wrong' ? 'bg-white text-red-600 shadow-sm ring-2 ring-red-100' : 'bg-white/40 text-gray-400'}`}
+              >
+                📕 错题本 ({stats.wrongHistory.length})
+              </button>
+              <button 
+                onClick={() => setHistorySource('saved')} 
+                className={`py-3.5 rounded-[20px] text-sm font-black transition-all flex items-center justify-center gap-2 ${historySource === 'saved' ? 'bg-white text-amber-600 shadow-sm ring-2 ring-amber-100' : 'bg-white/40 text-gray-400'}`}
+              >
+                ⭐ 收藏本 ({stats.savedHistory.length})
+              </button>
+            </div>
+            <p className="mt-4 text-[10px] text-amber-600/60 font-bold text-center italic">
+              当前符合筛选条件的本地题目共: {getHistoryPreviewCount()} 道
+            </p>
+          </section>
+        )}
+
         <section className="bg-white/70 backdrop-blur-sm p-6 rounded-[36px] shadow-sm border border-white">
           <h3 className="text-[11px] font-black text-gray-400 mb-5 uppercase tracking-[0.2em] flex items-center gap-2">
             <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full shadow-sm shadow-indigo-200"></span> 训练题量
@@ -151,7 +176,9 @@ const HomeView: React.FC<HomeViewProps> = ({
           </div>
           <div className="p-5 bg-white/50 rounded-[28px] border border-dashed border-gray-200 min-h-[80px] flex items-center">
             {selectedPoints.length === 0 ? (
-              <span className="text-[13px] font-bold italic tracking-tight opacity-70 text-gray-400">全真模拟：智能分发核心考点</span>
+              <span className="text-[13px] font-bold italic tracking-tight opacity-70 text-gray-400">
+                {mode === 'ai' ? '全真模拟：智能分发核心考点' : '不限：从全库中随机抽取'}
+              </span>
             ) : (
               <div className="flex flex-wrap gap-2">
                 {selectedPoints.map(p => <span key={p} className="px-3.5 py-2 bg-white border border-indigo-50 text-indigo-600 rounded-2xl text-[11px] font-black shadow-sm">#{p}</span>)}
@@ -160,7 +187,7 @@ const HomeView: React.FC<HomeViewProps> = ({
           </div>
         </section>
 
-        {hasWrongStats && topWrongPoint && (
+        {mode === 'ai' && hasWrongStats && topWrongPoint && (
           <section className="bg-gradient-to-br from-indigo-700 via-indigo-600 to-violet-700 p-8 rounded-[42px] shadow-2xl text-white relative overflow-hidden group">
             <div className="relative z-10">
               <h3 className="text-xl font-bold mb-6 leading-tight">你的 <span className="text-yellow-300 font-black underline underline-offset-8 decoration-yellow-300/40">#{topWrongPoint}</span><br/>是目前的薄弱环节</h3>
@@ -171,8 +198,17 @@ const HomeView: React.FC<HomeViewProps> = ({
       </div>
 
       <footer className="py-8 sticky bottom-0 bg-gray-50/95 backdrop-blur-xl z-20">
-        <button onClick={() => onStart(count, difficulty, selectedPoints)} className="w-full bg-indigo-600 text-white py-5 rounded-[30px] font-black text-xl shadow-xl active:scale-[0.97] transition-all flex items-center justify-center gap-4">
-          <span className="text-2xl">🚀</span> <span className="tracking-tight">开始{selectedPoints.length === 0 ? '智能' : '专项'}训练</span>
+        <button 
+          onClick={() => {
+            if (mode === 'ai') onStart(count, difficulty, selectedPoints);
+            else onStartHistory(historySource, count, difficulty, selectedPoints);
+          }} 
+          className="w-full bg-indigo-600 text-white py-5 rounded-[30px] font-black text-xl shadow-xl active:scale-[0.97] transition-all flex items-center justify-center gap-4"
+        >
+          <span className="text-2xl">{mode === 'ai' ? '🚀' : '🎯'}</span> 
+          <span className="tracking-tight">
+            {mode === 'ai' ? `开始${selectedPoints.length === 0 ? '智能' : '专项'}训练` : `开启${historySource === 'wrong' ? '错题' : '收藏'}复习`}
+          </span>
         </button>
       </footer>
 
@@ -184,7 +220,7 @@ const HomeView: React.FC<HomeViewProps> = ({
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
             </button>
           </header>
-          <div className="flex-1 overflow-y-auto p-8 pt-4 grid grid-cols-2 gap-4">
+          <div className="flex-1 overflow-y-auto p-8 pt-4 grid grid-cols-2 gap-4 no-scrollbar">
             {GRAMMAR_POINTS.map(point => (
               <button key={point} onClick={() => togglePoint(point)} className={`p-6 rounded-[28px] text-[15px] font-black border-2 transition-all text-left ${selectedPoints.includes(point) ? 'bg-indigo-600 border-indigo-600 text-white shadow-xl' : 'bg-white border-gray-100 text-gray-500'}`}>{point}</button>
             ))}

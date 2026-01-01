@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { Question, ChatMessage, WrongQuestion } from '../types';
 import { askFollowUpQuestion } from '../services/geminiService';
@@ -115,7 +114,7 @@ const QuizView: React.FC<QuizViewProps> = ({ questions, onFinish, onCancel, onQu
           <div className="flex justify-between items-center mb-3 min-h-[40px]">
             <div className="flex flex-col">
               <span className="text-[9px] font-bold text-gray-400 tracking-widest uppercase">Grammar Master Pro</span>
-              <span className="text-xs font-black text-indigo-600">第 {currentIndex + 1} 题 / 共 {questions.length}</span>
+              <span className="text-xs font-black text-indigo-600">第 {currentIndex + 1} 题 / 共 {questions.length} 题</span>
             </div>
             <button onClick={() => setIsExiting(true)} className="px-4 py-1.5 bg-white text-gray-400 rounded-full text-[10px] font-black shadow-sm border border-gray-100 active:scale-95">退出</button>
           </div>
