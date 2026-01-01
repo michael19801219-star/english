@@ -16,6 +16,11 @@ const App: React.FC = () => {
   const [loadingMsg, setLoadingMsg] = useState('');
   const [quizStartTime, setQuizStartTime] = useState<number>(0);
   
+  // API Key 状态管理
+  const [showKeyModal, setShowKeyModal] = useState(false);
+  const [inputKey, setInputKey] = useState(localStorage.getItem('user_custom_gemini_key') || '');
+  const [isUsingPersonalKey, setIsUsingPersonalKey] = useState(!!localStorage.getItem('user_custom_gemini_key'));
+
   const [userStats, setUserStats] = useState<UserStats>(() => {
     const saved = localStorage.getItem('gaokao_stats_v5');
     if (saved) {
@@ -55,6 +60,28 @@ const App: React.FC = () => {
     setUserStats(newStats);
   };
 
+  const handleSaveKey = () => {
+    const trimmed = inputKey.trim();
+    if (trimmed.startsWith('AIza')) {
+      localStorage.setItem('user_custom_gemini_key', trimmed);
+      setIsUsingPersonalKey(true);
+      setShowKeyModal(false);
+      alert("✅ API Key 已保存，应用已生效");
+    } else if (trimmed === '') {
+      handleResetKey();
+    } else {
+      alert("⚠️ 请输入有效的 Gemini API Key (以 AIza 开头)");
+    }
+  };
+
+  const handleResetKey = () => {
+    localStorage.removeItem('user_custom_gemini_key');
+    setInputKey('');
+    setIsUsingPersonalKey(false);
+    setShowKeyModal(false);
+    alert("已切回公共模式");
+  };
+
   const startQuiz = useCallback(async (count: number, difficulty: Difficulty, points: string[]) => {
     if (isProcessing) return;
     setIsProcessing(true);
@@ -71,7 +98,8 @@ const App: React.FC = () => {
       setView(AppState.QUIZ);
     } catch (error: any) {
       console.error("Quiz Start Error:", error);
-      alert("出题失败，请检查网络或 API 配置。");
+      // 如果报错可能与额度有关，提示配置 Key
+      setShowKeyModal(true);
       setView(AppState.HOME);
     } finally {
       setIsProcessing(false);
@@ -127,6 +155,8 @@ const App: React.FC = () => {
           onGoToReview={(tab) => { if (tab) setReviewInitialTab(tab); setView(AppState.REVIEW); }}
           onGoToStats={() => setView(AppState.STATS)}
           onUpdateStats={handleUpdateStats}
+          onOpenKeyModal={() => setShowKeyModal(true)}
+          isUsingPersonalKey={isUsingPersonalKey}
         />
       )}
       {view === AppState.LOADING && <LoadingView message={loadingMsg} onCancel={() => setView(AppState.HOME)} />}
@@ -135,7 +165,7 @@ const App: React.FC = () => {
           questions={questions} 
           onFinish={finishQuiz} 
           onCancel={() => setView(AppState.HOME)} 
-          onQuotaError={() => { alert("额度受限，请稍后再试。"); }}
+          onQuotaError={() => { setShowKeyModal(true); }}
           onAnswerSubmitted={(q, ans) => {
             if (ans !== q.answerIndex) {
               setUserStats(prev => {
@@ -174,6 +204,47 @@ const App: React.FC = () => {
       )}
       {view === AppState.STATS && (
         <StatsView stats={userStats} onBack={() => setView(AppState.HOME)} />
+      )}
+
+      {/* API Key 设置弹窗 - 根据截图设计 */}
+      {showKeyModal && (
+        <div className="fixed inset-0 z-[1000] bg-black/60 backdrop-blur-md flex items-center justify-center p-8 animate-fadeIn">
+          <div className="bg-white w-full max-w-sm rounded-[50px] p-10 shadow-2xl relative text-center">
+            <div className="text-5xl mb-6">⌛</div>
+            <h3 className="text-2xl font-black text-gray-900 mb-4 tracking-tight">公共流量受限</h3>
+            <p className="text-[13px] text-gray-400 font-medium leading-relaxed mb-10 px-4">
+              请在下方粘贴您申请的 Gemini API Key。使用个人 Key 可享受无限次练习。
+            </p>
+            
+            <div className="space-y-6">
+              <input 
+                type="text"
+                placeholder="AIzaSyArjTT..."
+                value={inputKey}
+                onChange={(e) => setInputKey(e.target.value)}
+                className="w-full px-6 py-5 bg-gray-50 border-2 border-gray-100 rounded-[28px] text-sm font-mono focus:border-indigo-500 outline-none transition-all shadow-inner"
+              />
+              
+              <button 
+                onClick={handleSaveKey}
+                className="w-full py-5 bg-[#5D57E8] text-white rounded-[28px] font-black text-lg shadow-xl active:scale-95 transition-all"
+              >
+                保存并启动应用
+              </button>
+              
+              <div className="flex justify-center gap-6 mt-4">
+                <button onClick={() => setShowKeyModal(false)} className="text-gray-400 font-bold text-sm">取消</button>
+                <button onClick={handleResetKey} className="text-red-400 font-bold text-sm">重置 Key</button>
+              </div>
+            </div>
+
+            <div className="mt-12 pt-6 border-t border-gray-50">
+              <p className="text-[10px] text-gray-300 font-medium">
+                * 您的 Key 将仅保存在本地浏览器缓存中。
+              </p>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* 确认清空弹窗 */}

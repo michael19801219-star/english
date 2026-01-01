@@ -253,7 +253,7 @@ const ReviewView: React.FC<ReviewViewProps> = ({
                             <div className="p-5 bg-green-50/50 rounded-2xl border border-green-100/30">
                               <h6 className="text-[10px] font-black text-green-700 uppercase mb-2">提分技巧</h6>
                               <ul className="space-y-2">
-                                {/* Fix: Added explicit type casting to string[] to resolve 'Property map does not exist on type unknown' error */}
+                                {/* Fix for line 292: Safely check diveData and tips, and explicitly cast tips to string[] before mapping */}
                                 {diveData && Array.isArray(diveData.tips) && (diveData.tips as string[]).map((tip: string, i: number) => (
                                   <li key={i} className="text-[13px] text-green-900 leading-relaxed font-bold flex gap-2">
                                     <span className="text-green-400">#</span> {tip}
