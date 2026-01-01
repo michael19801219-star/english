@@ -35,6 +35,10 @@ const SCHEMA = {
   }
 };
 
+/**
+ * 生成语法题目
+ * 每次调用都会重新获取 key 并创建 AI 实例
+ */
 export const generateGrammarQuestions = async (
   count: number, 
   targetPoints: string[], 
@@ -42,6 +46,8 @@ export const generateGrammarQuestions = async (
   onProgress?: (msg: string) => void
 ): Promise<Question[]> => {
   const apiKey = getActiveApiKey();
+  if (!apiKey) throw new Error("API_KEY_MISSING");
+
   const ai = new GoogleGenAI({ apiKey });
   const pointsDesc = targetPoints.length > 0 ? `重点考察：${targetPoints.join('、')}。` : "涵盖高考核心考点。";
   if (onProgress) onProgress("AI 正在构思题目...");
@@ -59,12 +65,15 @@ export const generateGrammarQuestions = async (
     });
     
     return JSON.parse(response.text || "[]");
-  } catch (error) {
+  } catch (error: any) {
     console.error("Gemini Question Generation Error:", error);
     throw error;
   }
 };
 
+/**
+ * AI 追问
+ */
 export const askFollowUpQuestion = async (
   questionContext: Question,
   history: ChatMessage[],
@@ -82,12 +91,15 @@ export const askFollowUpQuestion = async (
       }
     });
     return response.text || "老师正在组织语言...";
-  } catch (error) {
+  } catch (error: any) {
     console.error("Gemini Follow-up Error:", error);
     throw error;
   }
 };
 
+/**
+ * 考点精讲
+ */
 export const getGrammarDeepDive = async (
   pointName: string,
   wrongQuestions: WrongQuestion[]
@@ -114,7 +126,7 @@ export const getGrammarDeepDive = async (
       }
     });
     return JSON.parse(response.text || "{}");
-  } catch (error) {
+  } catch (error: any) {
     console.error("Gemini Deep Dive Error:", error);
     throw error;
   }

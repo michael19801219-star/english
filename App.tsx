@@ -66,7 +66,8 @@ const App: React.FC = () => {
       localStorage.setItem('user_custom_gemini_key', trimmed);
       setIsUsingPersonalKey(true);
       setShowKeyModal(false);
-      alert("✅ API Key 已保存，应用已生效");
+      // 这里的 alert 用于反馈，实际业务中 key 已经在下一次 Service 调用时生效
+      console.log("API Key Updated Successfully");
     } else if (trimmed === '') {
       handleResetKey();
     } else {
@@ -79,7 +80,7 @@ const App: React.FC = () => {
     setInputKey('');
     setIsUsingPersonalKey(false);
     setShowKeyModal(false);
-    alert("已切回公共模式");
+    alert("已重置并切回公共模式");
   };
 
   const startQuiz = useCallback(async (count: number, difficulty: Difficulty, points: string[]) => {
@@ -98,7 +99,7 @@ const App: React.FC = () => {
       setView(AppState.QUIZ);
     } catch (error: any) {
       console.error("Quiz Start Error:", error);
-      // 如果报错可能与额度有关，提示配置 Key
+      // 如果报错可能与额度有关，直接展示截图中的那个弹窗
       setShowKeyModal(true);
       setView(AppState.HOME);
     } finally {
@@ -206,40 +207,57 @@ const App: React.FC = () => {
         <StatsView stats={userStats} onBack={() => setView(AppState.HOME)} />
       )}
 
-      {/* API Key 设置弹窗 - 根据截图设计 */}
+      {/* API Key 设置弹窗 - 完全匹配截图 UI */}
       {showKeyModal && (
         <div className="fixed inset-0 z-[1000] bg-black/60 backdrop-blur-md flex items-center justify-center p-8 animate-fadeIn">
-          <div className="bg-white w-full max-w-sm rounded-[50px] p-10 shadow-2xl relative text-center">
-            <div className="text-5xl mb-6">⌛</div>
-            <h3 className="text-2xl font-black text-gray-900 mb-4 tracking-tight">公共流量受限</h3>
-            <p className="text-[13px] text-gray-400 font-medium leading-relaxed mb-10 px-4">
+          <div className="bg-white w-full max-w-sm rounded-[50px] p-10 shadow-2xl relative text-center border border-white/20">
+            {/* 沙漏图标 */}
+            <div className="flex justify-center mb-6">
+              <div className="text-5xl drop-shadow-sm">⌛</div>
+            </div>
+            
+            <h3 className="text-[24px] font-black text-[#1e293b] mb-4 tracking-tight">公共流量受限</h3>
+            
+            <p className="text-[13px] text-slate-400 font-medium leading-relaxed mb-10 px-2">
               请在下方粘贴您申请的 Gemini API Key。使用个人 Key 可享受无限次练习。
             </p>
             
             <div className="space-y-6">
-              <input 
-                type="text"
-                placeholder="AIzaSyArjTT..."
-                value={inputKey}
-                onChange={(e) => setInputKey(e.target.value)}
-                className="w-full px-6 py-5 bg-gray-50 border-2 border-gray-100 rounded-[28px] text-sm font-mono focus:border-indigo-500 outline-none transition-all shadow-inner"
-              />
+              <div className="relative group">
+                <input 
+                  type="text"
+                  placeholder="AIzaSyArjTT..."
+                  value={inputKey}
+                  onChange={(e) => setInputKey(e.target.value)}
+                  className="w-full px-7 py-5 bg-[#f8fafc] border-2 border-slate-100 rounded-[30px] text-sm font-mono focus:border-indigo-400 focus:bg-white outline-none transition-all shadow-inner text-slate-600"
+                />
+              </div>
               
               <button 
                 onClick={handleSaveKey}
-                className="w-full py-5 bg-[#5D57E8] text-white rounded-[28px] font-black text-lg shadow-xl active:scale-95 transition-all"
+                className="w-full py-5 bg-[#5b52f9] text-white rounded-[30px] font-bold text-lg shadow-xl shadow-indigo-100 active:scale-[0.97] transition-all"
               >
                 保存并启动应用
               </button>
               
-              <div className="flex justify-center gap-6 mt-4">
-                <button onClick={() => setShowKeyModal(false)} className="text-gray-400 font-bold text-sm">取消</button>
-                <button onClick={handleResetKey} className="text-red-400 font-bold text-sm">重置 Key</button>
+              <div className="flex justify-center items-center gap-8 mt-4">
+                <button 
+                  onClick={() => setShowKeyModal(false)} 
+                  className="text-slate-400 font-bold text-sm hover:text-slate-600 transition-colors"
+                >
+                  取消
+                </button>
+                <button 
+                  onClick={handleResetKey} 
+                  className="text-[#f87171] font-bold text-sm hover:text-red-600 transition-colors"
+                >
+                  重置 Key
+                </button>
               </div>
             </div>
 
-            <div className="mt-12 pt-6 border-t border-gray-50">
-              <p className="text-[10px] text-gray-300 font-medium">
+            <div className="mt-12 pt-6 border-t border-slate-50">
+              <p className="text-[10px] text-slate-300 font-medium tracking-wide">
                 * 您的 Key 将仅保存在本地浏览器缓存中。
               </p>
             </div>

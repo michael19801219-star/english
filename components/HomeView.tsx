@@ -95,16 +95,16 @@ const HomeView: React.FC<HomeViewProps> = ({
           <div className="flex flex-col">
             <div className="flex items-center gap-2 mb-2">
               <span className="text-[10px] font-black text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-md uppercase">周琮钦专属定制版</span>
-              {/* 模式切换胶囊 - 仅在主页显示 */}
+              {/* 模式切换胶囊 - 醒目设计 */}
               <button 
                 onClick={onOpenKeyModal}
-                className="flex items-center gap-2 px-3 py-1 bg-white rounded-full shadow-sm border border-gray-100 active:scale-95 transition-all"
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-full shadow-sm border transition-all active:scale-95 ${isUsingPersonalKey ? 'bg-indigo-600 border-indigo-500' : 'bg-white border-slate-100'}`}
               >
-                <div className={`w-2 h-2 rounded-full ${isUsingPersonalKey ? 'bg-green-500 animate-pulse' : 'bg-gray-300'}`}></div>
-                <span className="text-[10px] font-black text-gray-400 uppercase tracking-tight">
+                <div className={`w-1.5 h-1.5 rounded-full ${isUsingPersonalKey ? 'bg-green-400 animate-pulse' : 'bg-slate-300'}`}></div>
+                <span className={`text-[9px] font-black uppercase tracking-tight ${isUsingPersonalKey ? 'text-white' : 'text-slate-400'}`}>
                   {isUsingPersonalKey ? 'Personal Mode' : 'Public Mode'}
                 </span>
-                <span className="text-[12px] opacity-50">⚙️</span>
+                <span className="text-[12px] ml-0.5">⚙️</span>
               </button>
             </div>
             
