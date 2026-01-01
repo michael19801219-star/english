@@ -48,7 +48,7 @@ const App: React.FC = () => {
     setUserStats(prev => {
       const isSaved = prev.savedHistory.some(s => s.id === q.id || s.question === q.question);
       if (isSaved) {
-        return { ...prev, savedHistory: prev.savedHistory.filter(s => s.question !== q.question) };
+        return { ...prev, savedHistory: prev.savedHistory.filter(s => s.question !== q.question && s.id !== q.id) };
       } else {
         const newSaved: WrongQuestion = {
           ...q,
@@ -63,7 +63,6 @@ const App: React.FC = () => {
   const handleAnswerSubmitted = (q: Question, ans: number) => {
     if (ans !== q.answerIndex) {
       setUserStats(prev => {
-        // 检查错题是否已存在，避免重复（基于题目文本）
         const alreadyExists = prev.wrongHistory.some(h => h.question === q.question);
         if (alreadyExists) return prev;
 
@@ -84,6 +83,47 @@ const App: React.FC = () => {
         };
       });
     }
+  };
+
+  const removeWrongQuestion = (timestamp: number) => {
+    setUserStats(prev => {
+      // 优先匹配 timestamp，兜底匹配 question (兼容性增强)
+      const target = prev.wrongHistory.find(h => h.timestamp === timestamp);
+      const filteredHistory = prev.wrongHistory.filter(h => h.timestamp !== timestamp);
+
+      if (filteredHistory.length === prev.wrongHistory.length) return prev;
+
+      const newCounts = { ...prev.wrongCounts };
+      if (target) {
+        const pt = target.grammarPoint;
+        if (newCounts[pt] > 0) {
+          newCounts[pt] -= 1;
+          if (newCounts[pt] === 0) delete newCounts[pt];
+        }
+      }
+
+      return {
+        ...prev,
+        wrongCounts: newCounts,
+        wrongHistory: filteredHistory
+      };
+    });
+  };
+
+  const removeSavedQuestion = (timestamp: number) => {
+    setUserStats(prev => ({
+      ...prev,
+      savedHistory: prev.savedHistory.filter(h => h.timestamp !== timestamp)
+    }));
+  };
+
+  // 分离清空功能
+  const clearWrongHistory = () => {
+    setUserStats(prev => ({ ...prev, wrongCounts: {}, wrongHistory: [] }));
+  };
+
+  const clearSavedHistory = () => {
+    setUserStats(prev => ({ ...prev, savedHistory: [] }));
   };
 
   const startQuiz = async (count: number, difficulty: Difficulty, points: string[]) => {
@@ -108,7 +148,6 @@ const App: React.FC = () => {
         score++;
       } else {
         wrongPoints.push(questions[idx].grammarPoint);
-        // 错题已在 handleAnswerSubmitted 中实时录入，此处不再录入
       }
     });
 
@@ -161,8 +200,11 @@ const App: React.FC = () => {
           history={userStats.wrongHistory} 
           savedHistory={userStats.savedHistory}
           onBack={() => setView(AppState.HOME)} 
-          onClear={() => { if(confirm('确定清空所有记录吗？')){setUserStats({wrongCounts:{}, wrongHistory:[], savedHistory:[]});}}} 
+          onClearWrong={clearWrongHistory}
+          onClearSaved={clearSavedHistory}
           onStartQuiz={(p) => startQuiz(10, '中等', [p])} 
+          onRemoveWrong={removeWrongQuestion}
+          onRemoveSaved={removeSavedQuestion}
           initialTab={reviewInitialTab} 
         />
       )}
