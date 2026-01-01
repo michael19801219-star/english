@@ -42,6 +42,7 @@ export interface UserStats {
   totalAnswered: number;
   totalCorrect: number;
   dailyProgress: Record<string, number>; // "YYYY-MM-DD" -> count
+  pointAttempts: Record<string, number>; // 新增：每个考点的总答题次数
 }
 
 export interface ChatMessage {

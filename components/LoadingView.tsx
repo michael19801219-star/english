@@ -30,9 +30,6 @@ const LoadingView: React.FC<LoadingViewProps> = ({ message, onCancel }) => {
         <div className="h-1.5 bg-gray-50 rounded-full overflow-hidden">
           <div className="h-full bg-indigo-200 animate-[loading_2s_infinite]"></div>
         </div>
-        <p className="text-[10px] text-gray-300 text-center font-bold uppercase tracking-widest">
-          Tip: 免费版配额有限，如加载较慢请稍候
-        </p>
       </div>
 
       {onCancel && (

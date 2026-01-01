@@ -23,12 +23,28 @@ const StatsView: React.FC<StatsViewProps> = ({ stats, onBack }) => {
 
   const maxDailyCount = Math.max(...last7Days.map(d => d.count), 1);
 
-  // 考点掌握度计算 (简单算法：100 - (错题数 * 权重))
+  // 精准掌握度计算
   const masteryData = GRAMMAR_POINTS.map(point => {
-    const wrongCount = stats.wrongCounts[point] || 0;
-    const mastery = Math.max(0, 100 - (wrongCount * 10)); // 每错一个扣 10 分
-    return { point, mastery };
-  }).sort((a, b) => a.mastery - b.mastery);
+    const attempts = stats.pointAttempts?.[point] || 0;
+    const errors = stats.wrongCounts[point] || 0;
+    
+    let mastery = 0;
+    let isTested = attempts > 0;
+    
+    if (isTested) {
+      mastery = Math.round(((attempts - errors) / attempts) * 100);
+      mastery = Math.max(0, Math.min(100, mastery)); // 确保在0-100之间
+    }
+    
+    return { point, mastery, isTested, attempts };
+  }).sort((a, b) => {
+    // 排序逻辑：
+    // 1. 已练习的考点排在前面
+    // 2. 在已练习考点中，掌握度低的排在前面（需要优先攻克）
+    if (a.isTested && !b.isTested) return -1;
+    if (!a.isTested && b.isTested) return 1;
+    return a.mastery - b.mastery;
+  });
 
   return (
     <div className="flex-1 flex flex-col bg-[#FDFCF8] min-h-screen overflow-y-auto pb-20 no-scrollbar">
@@ -85,22 +101,34 @@ const StatsView: React.FC<StatsViewProps> = ({ stats, onBack }) => {
           </h3>
           <div className="space-y-6">
             {masteryData.map((item, i) => (
-              <div key={i} className="space-y-2">
+              <div key={i} className={`space-y-2 transition-opacity ${item.isTested ? 'opacity-100' : 'opacity-40'}`}>
                 <div className="flex justify-between items-center px-1">
-                  <span className={`text-xs font-black ${item.mastery < 60 ? 'text-red-600' : 'text-gray-700'}`}>
-                    {item.point}
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs font-black ${!item.isTested ? 'text-gray-400' : item.mastery < 60 ? 'text-red-600' : 'text-gray-700'}`}>
+                      {item.point}
+                    </span>
+                    {item.isTested && <span className="text-[8px] bg-gray-50 text-gray-400 px-1.5 py-0.5 rounded-md font-bold">试题x{item.attempts}</span>}
+                  </div>
+                  <span className="text-[10px] font-mono font-black text-gray-400">
+                    {item.isTested ? `${item.mastery}%` : '未练习'}
                   </span>
-                  <span className="text-[10px] font-mono font-black text-gray-400">{item.mastery}%</span>
                 </div>
-                <div className="h-2 bg-gray-50 rounded-full overflow-hidden">
-                  <div 
-                    className={`h-full rounded-full transition-all duration-1000 ${item.mastery < 60 ? 'bg-red-500' : item.mastery < 85 ? 'bg-indigo-400' : 'bg-green-400'}`}
-                    style={{ width: `${item.mastery}%` }}
-                  ></div>
+                <div className="h-2 bg-gray-50 rounded-full overflow-hidden shadow-inner">
+                  {item.isTested && (
+                    <div 
+                      className={`h-full rounded-full transition-all duration-1000 ${item.mastery < 60 ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.4)]' : item.mastery < 85 ? 'bg-amber-400' : 'bg-green-400'}`}
+                      style={{ width: `${item.mastery}%` }}
+                    ></div>
+                  )}
                 </div>
               </div>
             ))}
           </div>
+          {!stats.totalAnswered && (
+            <div className="mt-8 p-4 bg-indigo-50 rounded-2xl text-center">
+              <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">完成一次训练即可开启精准分析</p>
+            </div>
+          )}
         </section>
 
         <section className="py-10 text-center opacity-20">

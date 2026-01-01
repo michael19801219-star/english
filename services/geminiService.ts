@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { Question, Difficulty, ChatMessage, WrongQuestion } from "../types";
+import { Question, Difficulty, ChatMessage, WrongQuestion, GRAMMAR_POINTS } from "../types";
 
 const getActiveApiKey = () => {
   const localKey = localStorage.getItem('user_custom_gemini_key');
@@ -36,7 +36,10 @@ const SCHEMA = {
       options: { type: Type.ARRAY, items: { type: Type.STRING } },
       answerIndex: { type: Type.INTEGER },
       explanation: { type: Type.STRING },
-      grammarPoint: { type: Type.STRING },
+      grammarPoint: { 
+        type: Type.STRING, 
+        description: `必须从以下列表中精确选择一个：${GRAMMAR_POINTS.join('、')}` 
+      },
       difficulty: { type: Type.STRING }
     },
     required: ["id", "question", "translation", "options", "answerIndex", "explanation", "grammarPoint", "difficulty"]
@@ -50,22 +53,17 @@ export const generateGrammarQuestions = async (
 ): Promise<Question[]> => {
   return withRetry(async () => {
     const ai = new GoogleGenAI({ apiKey: getActiveApiKey() });
-    const pointsDesc = targetPoints.length > 0 ? `考点：${targetPoints.join('、')}。` : "涵盖高中考纲核心内容。";
+    const pointsDesc = targetPoints.length > 0 ? `当前专项考点：${targetPoints.join('、')}。` : "涵盖高考核心考点。";
     
     const prompt = `你是一位资深高考英语名师。请生成 ${count} 道英语语法填空选择题。
     
     严格要求：
-    1. 【平衡分布】：确保这 ${count} 道题中，正确答案 A、B、C、D 出现的概率基本一致，不要集中在某一个选项。
-    2. 【详尽解析】：解析必须使用纯中文，字数不少于 80 字。内容需包含：
-       - 核心考点说明。
-       - 句子结构分析。
-       - 正确选项的语法依据。
-       - 逐一说明其他三个干扰项为什么错误。
-    3. 【高考标准】：难度设为 ${difficulty}，风格需完全贴合近五年全国高考真题。
-    4. 【内容完整】：
-       - ${pointsDesc}
-       - 提供题目完整的【中文译文】。
-       - 选项和干扰项需具有高考级别的迷惑性。`;
+    1. 【考点对齐】：每道题目的 "grammarPoint" 字段必须严格等于以下列表中的其中一个字符串，不得自行简写或修改：
+       ${GRAMMAR_POINTS.join(', ')}
+    2. 【平衡分布】：确保正确答案 A、B、C、D 概率均衡。
+    3. 【详尽解析】：解析使用纯中文，包含：核心考点、句子结构、正确项依据、干扰项错误原因。
+    4. 【高考标准】：难度设为 ${difficulty}，风格贴合高考真题。
+    5. 【内容】：${pointsDesc}`;
 
     const response = await ai.models.generateContent({
       model: TARGET_MODEL,
@@ -73,7 +71,7 @@ export const generateGrammarQuestions = async (
       config: {
         responseMimeType: "application/json",
         responseSchema: SCHEMA,
-        temperature: 0.8 // 略微提高随机性以获得更好的选项分布
+        temperature: 0.7
       }
     });
     return JSON.parse(response.text || "[]");
@@ -119,7 +117,7 @@ export const getGrammarDeepDive = async (
           type: Type.OBJECT,
           properties: {
             lecture: { type: Type.STRING, description: "核心考点精讲（详尽中文）" },
-            mistakeAnalysis: { type: Type.STRING, description: "常见错误原因分析（结合错题的深度分析）" },
+            mistakeAnalysis: { type: Type.STRING, description: "常见错误原因分析" },
             tips: { type: Type.ARRAY, items: { type: Type.STRING }, description: "3-5条高考实战提分技巧" }
           },
           required: ["lecture", "mistakeAnalysis", "tips"]

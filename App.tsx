@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { AppState, Question, QuizResults, UserStats, Difficulty, WrongQuestion } from './types';
+import { AppState, Question, QuizResults, UserStats, Difficulty, WrongQuestion, GRAMMAR_POINTS } from './types';
 import { generateGrammarQuestions } from './services/geminiService';
 import HomeView from './components/HomeView';
 import QuizView from './components/QuizView';
@@ -27,7 +27,8 @@ const App: React.FC = () => {
     savedHistory: [],
     totalAnswered: 0,
     totalCorrect: 0,
-    dailyProgress: {}
+    dailyProgress: {},
+    pointAttempts: {}
   });
   const [showQuotaModal, setShowQuotaModal] = useState(false);
   const [showSyncModal, setShowSyncModal] = useState(false);
@@ -46,7 +47,8 @@ const App: React.FC = () => {
           savedHistory: parsed.savedHistory || [],
           totalAnswered: parsed.totalAnswered || 0,
           totalCorrect: parsed.totalCorrect || 0,
-          dailyProgress: parsed.dailyProgress || {}
+          dailyProgress: parsed.dailyProgress || {},
+          pointAttempts: parsed.pointAttempts || {}
         });
       } catch (e) { console.error(e); }
     }
@@ -62,6 +64,29 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('gaokao_stats_v3', JSON.stringify(userStats));
   }, [userStats]);
+
+  // 数据清洗：确保考点名称属于标准集合
+  const normalizePoint = (rawPoint: string): string => {
+    if (GRAMMAR_POINTS.includes(rawPoint)) return rawPoint;
+    
+    // 简单模糊匹配逻辑
+    for (const standard of GRAMMAR_POINTS) {
+      if (rawPoint.includes(standard) || standard.includes(rawPoint)) {
+        return standard;
+      }
+    }
+    
+    // 关键字映射
+    if (rawPoint.includes('时态') || rawPoint.includes('语态')) return '时态语态';
+    if (rawPoint.includes('虚拟') || rawPoint.includes('语气')) return '情态动词与虚拟语气';
+    if (rawPoint.includes('定语')) return '定语从句';
+    if (rawPoint.includes('名词') || rawPoint.includes('宾语') || rawPoint.includes('主语') || rawPoint.includes('表语')) return '名词性从句';
+    if (rawPoint.includes('非谓语')) return '非谓语动词';
+    if (rawPoint.includes('介词') || rawPoint.includes('冠词')) return '介词冠词';
+    if (rawPoint.includes('代词') || rawPoint.includes('形容词') || rawPoint.includes('副词')) return '代词与形容词副词';
+    
+    return GRAMMAR_POINTS[0]; // 兜底返回第一个
+  };
 
   const toggleSaveQuestion = (q: Question, userAnswerIndex?: number) => {
     setUserStats(prev => {
@@ -82,37 +107,44 @@ const App: React.FC = () => {
   const handleAnswerSubmitted = (q: Question, ans: number) => {
     const isCorrect = ans === q.answerIndex;
     const today = new Date().toISOString().split('T')[0];
+    const pt = normalizePoint(q.grammarPoint); // 关键：标准化考点名称
 
     setUserStats(prev => {
       const newDailyProgress = { ...prev.dailyProgress };
       newDailyProgress[today] = (newDailyProgress[today] || 0) + 1;
 
+      const newPointAttempts = { ...prev.pointAttempts };
+      newPointAttempts[pt] = (newPointAttempts[pt] || 0) + 1;
+
       let newState = {
         ...prev,
         totalAnswered: prev.totalAnswered + 1,
         totalCorrect: prev.totalCorrect + (isCorrect ? 1 : 0),
-        dailyProgress: newDailyProgress
+        dailyProgress: newDailyProgress,
+        pointAttempts: newPointAttempts
       };
 
       if (!isCorrect) {
-        const alreadyExists = prev.wrongHistory.some(h => h.question === q.question);
-        if (!alreadyExists) {
-          const newCounts = { ...prev.wrongCounts };
-          const pt = q.grammarPoint;
-          newCounts[pt] = (newCounts[pt] || 0) + 1;
-          
+        const newCounts = { ...prev.wrongCounts };
+        newCounts[pt] = (newCounts[pt] || 0) + 1;
+        
+        const alreadyInHistory = prev.wrongHistory.some(h => h.question === q.question);
+        let newHistory = prev.wrongHistory;
+        
+        if (!alreadyInHistory) {
           const newWrong: WrongQuestion = {
             ...q,
             userAnswerIndex: ans,
             timestamp: Date.now()
           };
-          
-          newState = {
-            ...newState,
-            wrongCounts: newCounts,
-            wrongHistory: [newWrong, ...prev.wrongHistory].slice(0, 100)
-          };
+          newHistory = [newWrong, ...prev.wrongHistory].slice(0, 100);
         }
+        
+        newState = {
+          ...newState,
+          wrongCounts: newCounts,
+          wrongHistory: newHistory
+        };
       }
       return newState;
     });
@@ -125,7 +157,7 @@ const App: React.FC = () => {
       if (filteredHistory.length === prev.wrongHistory.length) return prev;
       const newCounts = { ...prev.wrongCounts };
       if (target) {
-        const pt = target.grammarPoint;
+        const pt = normalizePoint(target.grammarPoint);
         if (newCounts[pt] > 0) {
           newCounts[pt] -= 1;
           if (newCounts[pt] === 0) delete newCounts[pt];
@@ -168,7 +200,7 @@ const App: React.FC = () => {
     const wrongPoints: string[] = [];
     userAnswers.forEach((ans, idx) => {
       if (ans === questions[idx].answerIndex) score++;
-      else wrongPoints.push(questions[idx].grammarPoint);
+      else wrongPoints.push(normalizePoint(questions[idx].grammarPoint));
     });
     setResults({ 
       score, 
@@ -278,7 +310,7 @@ const App: React.FC = () => {
         <StatsView stats={userStats} onBack={() => setView(AppState.HOME)} />
       )}
 
-      {/* API Key Modal & Sync Modal ... */}
+      {/* API Key Modal */}
       {showQuotaModal && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-md p-6 animate-fadeIn">
           <div className="bg-white w-full max-w-xs rounded-[40px] p-8 shadow-2xl text-center">
