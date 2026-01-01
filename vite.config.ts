@@ -6,8 +6,8 @@ export default defineConfig({
   plugins: [react()],
   define: {
     // 强制将环境变量注入到前端运行环境
-    // 优先使用环境变量，否则回退到指定的公共 API Key
-    'process.env.API_KEY': JSON.stringify(process.env.VITE_API_KEY || process.env.API_KEY || "AIzaSyBnDmOI3K3uuJ7qxpfhYgqWjuXysnDq-40")
+    // 即使 process.env 消失，代码中也会保留具体的 Key 字符串
+    'process.env.API_KEY': JSON.stringify(process.env.VITE_API_KEY || process.env.API_KEY || "")
   },
   server: {
     // 允许通过手机局域网访问

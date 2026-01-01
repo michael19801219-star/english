@@ -2,6 +2,12 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Question, Difficulty, ChatMessage, WrongQuestion } from "../types";
 
+const getActiveApiKey = () => {
+  const localKey = localStorage.getItem('user_custom_gemini_key');
+  if (localKey && localKey.startsWith('AIza')) return localKey;
+  return process.env.API_KEY || (window as any).process?.env?.API_KEY || "";
+};
+
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function withRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
@@ -43,18 +49,18 @@ export const generateGrammarQuestions = async (
   difficulty: Difficulty
 ): Promise<Question[]> => {
   return withRetry(async () => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = new GoogleGenAI({ apiKey: getActiveApiKey() });
     const pointsDesc = targetPoints.length > 0 ? `考点：${targetPoints.join('、')}。` : "涵盖高中考纲核心内容。";
     
     const prompt = `你是一位资深高考英语名师。请生成 ${count} 道英语语法填空选择题。
     
     严格要求：
     1. 【平衡分布】：确保这 ${count} 道题中，正确答案 A、B、C、D 出现的概率基本一致，不要集中在某一个选项。
-    2. 【详尽解析】：解析必须使用纯中文，字数不少于 120 字。内容需包含：
+    2. 【详尽解析】：解析必须使用纯中文，字数不少于 80 字。内容需包含：
        - 核心考点说明。
        - 句子结构分析。
        - 正确选项的语法依据。
-       - 逐一说明其他三个干扰项为什么错误（必须针对每个选项给出排除逻辑）。
+       - 逐一说明其他三个干扰项为什么错误。
     3. 【高考标准】：难度设为 ${difficulty}，风格需完全贴合近五年全国高考真题。
     4. 【内容完整】：
        - ${pointsDesc}
@@ -67,7 +73,7 @@ export const generateGrammarQuestions = async (
       config: {
         responseMimeType: "application/json",
         responseSchema: SCHEMA,
-        temperature: 0.8 
+        temperature: 0.8 // 略微提高随机性以获得更好的选项分布
       }
     });
     return JSON.parse(response.text || "[]");
@@ -80,7 +86,7 @@ export const askFollowUpQuestion = async (
   userQuery: string
 ): Promise<string> => {
   return withRetry(async () => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = new GoogleGenAI({ apiKey: getActiveApiKey() });
     const response = await ai.models.generateContent({
       model: TARGET_MODEL,
       contents: `针对该题目进行中文答疑：\n题目：${questionContext.question}\n译文：${questionContext.translation}\n当前已有的解析：${questionContext.explanation}\n学生的问题：${userQuery}`,
@@ -98,7 +104,7 @@ export const getGrammarDeepDive = async (
   wrongQuestions: WrongQuestion[]
 ): Promise<{ lecture: string; mistakeAnalysis: string; tips: string[] }> => {
   return withRetry(async () => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = new GoogleGenAI({ apiKey: getActiveApiKey() });
     const response = await ai.models.generateContent({
       model: TARGET_MODEL,
       contents: `请对考点“${pointName}”进行深度总结。

@@ -6,9 +6,11 @@ interface HomeViewProps {
   onStart: (count: number, difficulty: Difficulty, points: string[]) => void;
   stats: UserStats;
   onGoToReview: (tab?: 'summary' | 'details' | 'saved') => void;
+  isUsingPersonalKey: boolean;
+  onOpenQuotaModal: () => void;
 }
 
-const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview }) => {
+const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, isUsingPersonalKey, onOpenQuotaModal }) => {
   const [count, setCount] = useState(10);
   const [difficulty, setDifficulty] = useState<Difficulty>('中等');
   const [selectedPoints, setSelectedPoints] = useState<string[]>([]);
@@ -30,6 +32,18 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview }) => 
     <div className="flex-1 flex flex-col p-6 overflow-y-auto animate-fadeIn pb-10 relative">
       <div className="absolute top-[-80px] left-[-40px] w-72 h-72 bg-indigo-200 rounded-full blur-[90px] opacity-30 -z-10"></div>
       
+      {/* 状态栏图标 - 仅在首页显示 */}
+      <div 
+        onClick={onOpenQuotaModal}
+        className={`mx-auto mb-4 px-3 py-1.5 rounded-full backdrop-blur-md border flex items-center gap-2 cursor-pointer transition-all active:scale-95 w-max ${isUsingPersonalKey ? 'bg-indigo-600 text-white border-indigo-400' : 'bg-white/80 text-gray-500 border-gray-100 shadow-sm'}`}
+      >
+        <span className={`w-1.5 h-1.5 rounded-full ${isUsingPersonalKey ? 'bg-green-400 animate-pulse' : 'bg-gray-300'}`}></span>
+        <span className="text-[10px] font-black uppercase tracking-widest">
+          {isUsingPersonalKey ? '个人密钥已激活' : '公共模式 (额度受限)'}
+        </span>
+        <span className="text-xs">⚙️</span>
+      </div>
+
       <header className="py-8 flex justify-between items-start">
         <div className="flex flex-col">
           <h1 className="text-[30px] font-black text-gray-900 leading-[1.1] tracking-tight">

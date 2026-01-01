@@ -8,13 +8,23 @@ import ResultView from './components/ResultView';
 import LoadingView from './components/LoadingView';
 import ReviewView from './components/ReviewView';
 
+const RECOMMENDED_KEYS = [
+  'AIzaSyArjTTl1aJm-OUK2i9J-5CDv0riCHF00Cs',
+  'AIzaSyBnDmOI3K3uuJ7qxpfhYgqWjuXysnDq-40',
+  'AIzaSyDm-P8H_Ijbko5Umzj0z7_h97S2qJ4-0Rc',
+  'AIzaSyA0a4jkHp-ElbFzKgsiN0_m6tVCpFu34mM'
+];
+
 const App: React.FC = () => {
   const [view, setView] = useState<AppState>(AppState.HOME);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [results, setResults] = useState<QuizResults | null>(null);
   const [loadingMsg, setLoadingMsg] = useState('');
   const [userStats, setUserStats] = useState<UserStats>({ wrongCounts: {}, wrongHistory: [], savedHistory: [] });
+  const [showQuotaModal, setShowQuotaModal] = useState(false);
   const [reviewInitialTab, setReviewInitialTab] = useState<'summary' | 'details' | 'saved'>('summary');
+  const [isUsingPersonalKey, setIsUsingPersonalKey] = useState(false);
+  const [inputKey, setInputKey] = useState('');
 
   useEffect(() => {
     const saved = localStorage.getItem('gaokao_stats_v3');
@@ -28,6 +38,13 @@ const App: React.FC = () => {
         });
       } catch (e) { console.error(e); }
     }
+    
+    const checkKeyStatus = () => {
+      const localKey = localStorage.getItem('user_custom_gemini_key');
+      setIsUsingPersonalKey(!!localKey);
+      if (localKey) setInputKey(localKey);
+    };
+    checkKeyStatus();
   }, []);
 
   useEffect(() => {
@@ -123,7 +140,7 @@ const App: React.FC = () => {
       setView(AppState.QUIZ);
     } catch (error: any) {
       setView(AppState.HOME);
-      alert('加载失败，请检查网络连接或稍后再试。');
+      setShowQuotaModal(true);
     }
   };
 
@@ -149,6 +166,16 @@ const App: React.FC = () => {
     setView(AppState.RESULT);
   };
 
+  const handleSaveKey = (key: string) => {
+    const trimmed = key.trim();
+    if (trimmed) {
+      localStorage.setItem('user_custom_gemini_key', trimmed);
+      setIsUsingPersonalKey(true);
+      setInputKey(trimmed);
+      setShowQuotaModal(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col max-w-md mx-auto relative overflow-hidden shadow-2xl">
       {view === AppState.HOME && (
@@ -156,6 +183,8 @@ const App: React.FC = () => {
           onStart={startQuiz} 
           stats={userStats} 
           onGoToReview={(tab) => { setReviewInitialTab(tab as any || 'summary'); setView(AppState.REVIEW); }} 
+          isUsingPersonalKey={isUsingPersonalKey}
+          onOpenQuotaModal={() => setShowQuotaModal(true)}
         />
       )}
       
@@ -166,6 +195,7 @@ const App: React.FC = () => {
           questions={questions} 
           onFinish={finishQuiz} 
           onCancel={() => setView(AppState.HOME)} 
+          onQuotaError={() => setShowQuotaModal(true)}
           onToggleSave={toggleSaveQuestion}
           onAnswerSubmitted={handleAnswerSubmitted}
           savedHistory={userStats.savedHistory}
@@ -192,6 +222,56 @@ const App: React.FC = () => {
           onRemoveSaved={removeSavedQuestion}
           initialTab={reviewInitialTab} 
         />
+      )}
+
+      {showQuotaModal && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-md p-6 animate-fadeIn">
+          <div className="bg-white w-full max-w-xs rounded-[40px] p-8 shadow-2xl text-center">
+            <h3 className="text-xl font-black mb-4">更新 API Key</h3>
+            
+            <div className="mb-6">
+              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3 text-left">推荐备用 Key (点击直接填入)</p>
+              <div className="flex flex-col gap-2">
+                {RECOMMENDED_KEYS.map((k, i) => (
+                  <button 
+                    key={i}
+                    onClick={() => handleSaveKey(k)}
+                    className="py-2.5 px-3 bg-indigo-50 text-indigo-600 rounded-xl text-[9px] font-mono truncate border border-indigo-100 active:bg-indigo-100 transition-colors text-left shadow-sm"
+                  >
+                    {k}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="relative mb-6">
+              <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-100"></div></div>
+              <div className="relative flex justify-center text-[9px] uppercase font-bold"><span className="bg-white px-2 text-gray-300">或者手动粘贴</span></div>
+            </div>
+
+            <input 
+              type="text"
+              placeholder="粘贴 AIzaSy... 密钥"
+              value={inputKey}
+              onChange={(e) => setInputKey(e.target.value)}
+              className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-2xl text-sm font-mono outline-none mb-4 focus:border-indigo-400 focus:bg-white transition-all"
+            />
+            
+            <button 
+              onClick={() => handleSaveKey(inputKey)}
+              className="w-full py-4.5 bg-indigo-600 text-white rounded-2xl font-black mb-6 shadow-xl shadow-indigo-100 active:scale-95 transition-transform"
+            >
+              确定保存
+            </button>
+            
+            <button 
+              onClick={() => setShowQuotaModal(false)} 
+              className="text-gray-400 font-bold text-xs active:opacity-50"
+            >
+              取消
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
