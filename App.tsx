@@ -55,58 +55,6 @@ const App: React.FC = () => {
     setUserStats(newStats);
   };
 
-  const handleGoToReview = (tab?: 'summary' | 'details' | 'saved') => {
-    if (tab) setReviewInitialTab(tab);
-    setView(AppState.REVIEW);
-  };
-
-  const handleGoToStats = () => {
-    setView(AppState.STATS);
-  };
-
-  const handleAnswerSubmitted = (question: Question, userAnswerIndex: number) => {
-    if (userAnswerIndex !== question.answerIndex) {
-      setUserStats(prev => {
-        const point = question.grammarPoint;
-        const newCounts = { ...prev.wrongCounts, [point]: (prev.wrongCounts[point] || 0) + 1 };
-        const exists = prev.wrongHistory.some(q => q.question === question.question);
-        if (exists) return prev;
-        const wrongEntry: WrongQuestion = { ...question, userAnswerIndex, timestamp: Date.now() };
-        return { ...prev, wrongCounts: newCounts, wrongHistory: [wrongEntry, ...prev.wrongHistory].slice(0, 200) };
-      });
-    }
-  };
-
-  const toggleSaveQuestion = (question: Question, userAnswerIndex: number) => {
-    setUserStats(prev => {
-      const isAlreadySaved = prev.savedHistory.some(q => q.question === question.question);
-      if (isAlreadySaved) {
-        return { ...prev, savedHistory: prev.savedHistory.filter(q => q.question !== question.question) };
-      } else {
-        const saveEntry: WrongQuestion = { ...question, userAnswerIndex, timestamp: Date.now() };
-        return { ...prev, savedHistory: [saveEntry, ...prev.savedHistory].slice(0, 100) };
-      }
-    });
-  };
-
-  const handleDeleteWrong = (timestamp: number) => {
-    setUserStats(prev => {
-      const itemToDelete = prev.wrongHistory.find(q => q.timestamp === timestamp);
-      if (!itemToDelete) return prev;
-      const point = itemToDelete.grammarPoint;
-      const newCounts = { ...prev.wrongCounts };
-      if (newCounts[point] > 0) {
-        newCounts[point]--;
-        if (newCounts[point] === 0) delete newCounts[point];
-      }
-      return { ...prev, wrongHistory: prev.wrongHistory.filter(q => q.timestamp !== timestamp), wrongCounts: newCounts };
-    });
-  };
-
-  const handleDeleteSaved = (timestamp: number) => {
-    setUserStats(prev => ({ ...prev, savedHistory: prev.savedHistory.filter(q => q.timestamp !== timestamp) }));
-  };
-
   const startQuiz = useCallback(async (count: number, difficulty: Difficulty, points: string[]) => {
     if (isProcessing) return;
     setIsProcessing(true);
@@ -118,12 +66,12 @@ const App: React.FC = () => {
         setLoadingMsg(msg);
       });
       
-      if (!newQuestions || newQuestions.length === 0) throw new Error("EMPTY_DATA");
       setQuestions(newQuestions);
       setQuizStartTime(Date.now());
       setView(AppState.QUIZ);
     } catch (error: any) {
-      alert("出题遇到状况，请检查网络后再试。");
+      console.error("Quiz Start Error:", error);
+      alert("出题失败，请检查网络或 API 配置。");
       setView(AppState.HOME);
     } finally {
       setIsProcessing(false);
@@ -176,8 +124,8 @@ const App: React.FC = () => {
         <HomeView 
           onStart={startQuiz} 
           stats={userStats} 
-          onGoToReview={handleGoToReview}
-          onGoToStats={handleGoToStats}
+          onGoToReview={(tab) => { if (tab) setReviewInitialTab(tab); setView(AppState.REVIEW); }}
+          onGoToStats={() => setView(AppState.STATS)}
           onUpdateStats={handleUpdateStats}
         />
       )}
@@ -187,9 +135,25 @@ const App: React.FC = () => {
           questions={questions} 
           onFinish={finishQuiz} 
           onCancel={() => setView(AppState.HOME)} 
-          onQuotaError={() => alert("当前 AI 忙碌，请稍后再试。")}
-          onAnswerSubmitted={handleAnswerSubmitted}
-          onToggleSave={toggleSaveQuestion}
+          onQuotaError={() => { alert("额度受限，请稍后再试。"); }}
+          onAnswerSubmitted={(q, ans) => {
+            if (ans !== q.answerIndex) {
+              setUserStats(prev => {
+                const point = q.grammarPoint;
+                const newCounts = { ...prev.wrongCounts, [point]: (prev.wrongCounts[point] || 0) + 1 };
+                const exists = prev.wrongHistory.some(h => h.question === q.question);
+                if (exists) return prev;
+                return { ...prev, wrongCounts: newCounts, wrongHistory: [{ ...q, userAnswerIndex: ans, timestamp: Date.now() }, ...prev.wrongHistory].slice(0, 200) };
+              });
+            }
+          }}
+          onToggleSave={(q, ans) => {
+            setUserStats(prev => {
+              const saved = prev.savedHistory.some(s => s.question === q.question);
+              if (saved) return { ...prev, savedHistory: prev.savedHistory.filter(s => s.question !== q.question) };
+              return { ...prev, savedHistory: [{ ...q, userAnswerIndex: ans, timestamp: Date.now() }, ...prev.savedHistory].slice(0, 100) };
+            });
+          }}
           savedHistory={userStats.savedHistory}
         />
       )}
@@ -202,9 +166,9 @@ const App: React.FC = () => {
           savedHistory={userStats.savedHistory}
           onBack={() => setView(AppState.HOME)} 
           onClear={(type) => setClearConfirm({ isOpen: true, type })} 
-          onDeleteWrong={handleDeleteWrong}
-          onDeleteSaved={handleDeleteSaved}
-          onStartQuiz={(point) => startQuiz(10, '中等', [point])}
+          onDeleteWrong={(ts) => setUserStats(prev => ({ ...prev, wrongHistory: prev.wrongHistory.filter(h => h.timestamp !== ts) }))}
+          onDeleteSaved={(ts) => setUserStats(prev => ({ ...prev, savedHistory: prev.savedHistory.filter(h => h.timestamp !== ts) }))}
+          onStartQuiz={(p) => startQuiz(10, '中等', [p])}
           initialTab={reviewInitialTab}
         />
       )}
@@ -212,6 +176,7 @@ const App: React.FC = () => {
         <StatsView stats={userStats} onBack={() => setView(AppState.HOME)} />
       )}
 
+      {/* 确认清空弹窗 */}
       {clearConfirm.isOpen && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/40 backdrop-blur-sm p-6 animate-fadeIn">
           <div className="bg-white w-full max-w-sm rounded-[40px] p-8 shadow-2xl">

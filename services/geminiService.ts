@@ -2,10 +2,8 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Question, Difficulty, ChatMessage, WrongQuestion } from "../types";
 
-/**
- * 强制使用 2.5 Lite 模型 ('gemini-flash-lite-latest')
- */
-const TEXT_MODEL = 'gemini-flash-lite-latest';
+// Using gemini-3-pro-preview for complex reasoning tasks
+const TEXT_MODEL = 'gemini-3-pro-preview';
 
 const SCHEMA = {
   type: Type.ARRAY,
@@ -25,15 +23,18 @@ const SCHEMA = {
   }
 };
 
+/**
+ * Generates grammar questions using Gemini AI.
+ */
 export const generateGrammarQuestions = async (
   count: number, 
   targetPoints: string[], 
   difficulty: Difficulty,
   onProgress?: (msg: string) => void
 ): Promise<Question[]> => {
+  // Always use process.env.API_KEY directly as per guidelines
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const pointsDesc = targetPoints.length > 0 ? `重点考察：${targetPoints.join('、')}。` : "涵盖高考核心考点。";
-  
   if (onProgress) onProgress("AI 正在构思题目...");
 
   try {
@@ -41,32 +42,30 @@ export const generateGrammarQuestions = async (
       model: TEXT_MODEL,
       contents: `生成 ${count} 道单项填空练习题。难度：${difficulty}。${pointsDesc}`,
       config: {
-        systemInstruction: `你是一位高考英语名师。
-        1. 题目语境真实，符合高考逻辑。
-        2. 解析需包含结构分析和关键词提示。
-        3. 必须为题目提供准确的【中文翻译】。
-        4. 仅返回 JSON 数据，严禁包含 Markdown 标记。`,
+        systemInstruction: `你是一位高考英语名师。1. 题目符合高考逻辑。2. 解析包含结构分析。3. 必须提供【中文翻译】。4. 仅返回 JSON。`,
         responseMimeType: "application/json",
         responseSchema: SCHEMA,
         temperature: 0.4
       }
     });
     
-    const text = response.text || "[]";
-    const data = JSON.parse(text);
-    if (!Array.isArray(data) || data.length === 0) throw new Error("EMPTY_DATA");
-    return data;
-  } catch (e) {
-    console.error("Generate error:", e);
-    throw new Error("GENERATION_FAILED");
+    // response.text is a getter, used correctly here
+    return JSON.parse(response.text || "[]");
+  } catch (error) {
+    console.error("Gemini Question Generation Error:", error);
+    throw error;
   }
 };
 
+/**
+ * Handles follow-up questions from the user about a specific quiz question.
+ */
 export const askFollowUpQuestion = async (
   questionContext: Question,
   history: ChatMessage[],
   userQuery: string
 ): Promise<string> => {
+  // Always use process.env.API_KEY directly
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
     const response = await ai.models.generateContent({
@@ -77,26 +76,29 @@ export const askFollowUpQuestion = async (
         temperature: 0.7 
       }
     });
-    return response.text || "老师正在组织语言，请再问一遍。";
-  } catch (e) {
-    console.error("Ask error:", e);
-    return "暂时无法连接 AI 助教，请稍后再试。";
+    return response.text || "老师正在组织语言...";
+  } catch (error) {
+    console.error("Gemini Follow-up Error:", error);
+    throw error;
   }
 };
 
+/**
+ * Generates a deep dive lesson on a specific grammar point.
+ */
 export const getGrammarDeepDive = async (
   pointName: string,
   wrongQuestions: WrongQuestion[]
 ): Promise<{ lecture: string; mistakeAnalysis: string; tips: string[] }> => {
+  // Always use process.env.API_KEY directly
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const context = wrongQuestions.slice(0, 2).map(q => q.question).join('|');
-  
   try {
     const response = await ai.models.generateContent({
       model: TEXT_MODEL,
       contents: `生成“${pointName}”的精讲。错题案例：${context}`,
       config: {
-        systemInstruction: `输出 JSON 复习讲义：lecture(讲解), mistakeAnalysis(易错点), tips(3个技巧数组)。`,
+        systemInstruction: `输出 JSON 复习讲义：lecture, mistakeAnalysis, tips(3个技巧)。`,
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -106,17 +108,12 @@ export const getGrammarDeepDive = async (
             tips: { type: Type.ARRAY, items: { type: Type.STRING } }
           },
           required: ["lecture", "mistakeAnalysis", "tips"]
-        },
-        temperature: 0.2
+        }
       }
     });
     return JSON.parse(response.text || "{}");
-  } catch (e) {
-    console.error("Deep dive error:", e);
-    return {
-      lecture: "暂时无法生成详细讲义。",
-      mistakeAnalysis: "请参考错题集的解析内容。",
-      tips: ["多看例句", "分析句子成分", "背诵核心搭配"]
-    };
+  } catch (error) {
+    console.error("Gemini Deep Dive Error:", error);
+    throw error;
   }
 };

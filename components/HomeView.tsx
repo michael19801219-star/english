@@ -1,7 +1,6 @@
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { UserStats, Difficulty, GRAMMAR_POINTS } from '../types';
-import { getManualBackupCode, importFromManualCode } from '../services/syncService';
 
 interface HomeViewProps {
   onStart: (count: number, difficulty: Difficulty, points: string[]) => void;
@@ -11,35 +10,64 @@ interface HomeViewProps {
   onUpdateStats: (newStats: UserStats) => void;
 }
 
-const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onGoToStats, onUpdateStats }) => {
+const HomeView: React.FC<HomeViewProps> = ({ 
+  onStart, stats, onGoToReview, onGoToStats, onUpdateStats
+}) => {
   const [count, setCount] = useState(10);
   const [difficulty, setDifficulty] = useState<Difficulty>('中等');
   const [selectedPoints, setSelectedPoints] = useState<string[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   
   const [isSyncOpen, setIsSyncOpen] = useState(false);
-  const [manualCode, setManualCode] = useState('');
   const [downloadConfirm, setDownloadConfirm] = useState<{ isOpen: boolean; data: UserStats | null }>({ isOpen: false, data: null });
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const togglePoint = (point: string) => {
     setSelectedPoints(prev => prev.includes(point) ? prev.filter(p => p !== point) : [...prev, point]);
   };
 
-  const handleManualExport = () => {
-    const code = getManualBackupCode(stats);
-    setManualCode(code);
-    navigator.clipboard.writeText(code).then(() => {
-      alert("✅ 备份代码已成功复制！\n请通过微信发送给另一台手机粘贴。");
-    });
+  const handleDownloadBackup = () => {
+    try {
+      const dataStr = JSON.stringify(stats, null, 2);
+      const blob = new Blob([dataStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const date = new Date().toISOString().split('T')[0];
+      link.href = url;
+      link.download = `语法通备份_${date}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert("导出失败，请重试");
+    }
   };
 
-  const handleManualImport = () => {
-    const data = importFromManualCode(manualCode);
-    if (data) {
-      setDownloadConfirm({ isOpen: true, data: data });
-    } else {
-      alert("❌ 备份代码格式无效。");
-    }
+  const handleUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const content = event.target?.result as string;
+        const data = JSON.parse(content) as UserStats;
+        if (data && (typeof data.wrongCounts === 'object' || Array.isArray(data.wrongHistory))) {
+          setDownloadConfirm({ isOpen: true, data: data });
+        } else {
+          throw new Error("Invalid format");
+        }
+      } catch (err) {
+        alert("❌ 无效的备份文件");
+      }
+      e.target.value = '';
+    };
+    reader.readAsText(file);
   };
 
   const executeDownload = () => {
@@ -47,7 +75,7 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onGoT
       onUpdateStats(downloadConfirm.data);
       setDownloadConfirm({ isOpen: false, data: null });
       setIsSyncOpen(false);
-      alert("🎉 离线数据迁移完成！");
+      alert("🎉 数据同步成功！");
     }
   };
 
@@ -60,17 +88,21 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onGoT
     <div className="flex-1 flex flex-col bg-gray-50 animate-fadeIn h-full overflow-hidden">
       <div className="absolute top-[-80px] left-[-40px] w-72 h-72 bg-indigo-200 rounded-full blur-[90px] opacity-30 -z-10"></div>
       
-      {/* 内容滚动区域 */}
       <div className="flex-1 overflow-y-auto px-6 no-scrollbar pb-10">
         <header className="py-8 flex justify-between items-start">
           <div className="flex flex-col">
-            <span className="text-[10px] font-black text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-md uppercase mb-1">周琮钦专属定制版</span>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-[10px] font-black text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-md uppercase">周琮钦专属定制版</span>
+            </div>
+            
             <h1 className="text-[30px] font-black text-gray-900 leading-[1.1]">英语语法<br/><span className="text-indigo-600">通关大师</span></h1>
-            <button onClick={() => setIsSyncOpen(true)} className="mt-4 flex items-center gap-2 px-3 py-1.5 bg-white rounded-full shadow-sm border border-gray-100 active:scale-95 transition-all">
-              <span className="text-xs font-bold text-gray-500">💾 数据同步</span>
-              <div className="w-2 h-2 rounded-full bg-indigo-400"></div>
+            
+            <button onClick={() => setIsSyncOpen(true)} className="mt-4 w-max flex items-center gap-2 px-3 py-1.5 bg-white rounded-full shadow-sm border border-gray-100 active:scale-95 transition-all">
+              <span className="text-xs font-bold text-gray-500">💾 数据备份</span>
             </button>
           </div>
+          
+          {/* 右侧功能图标 */}
           <div className="flex gap-2">
             <button onClick={onGoToStats} className="bg-white p-3 rounded-[20px] shadow-sm border border-gray-100 flex flex-col items-center active:scale-90 transition-all">
               <span className="text-xl">📊</span>
@@ -138,7 +170,6 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onGoT
         </div>
       </div>
 
-      {/* 固定底部的操作栏 */}
       <footer className="p-6 bg-white border-t border-gray-100 safe-area-bottom shadow-[0_-10px_30px_-10px_rgba(0,0,0,0.05)]">
         <button onClick={() => onStart(count, difficulty, selectedPoints)} className="w-full bg-indigo-600 text-white py-5 rounded-[28px] font-black text-lg shadow-xl active:scale-95 transition-all">🚀 启动练习</button>
       </footer>
@@ -146,16 +177,18 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onGoT
       {isSyncOpen && (
         <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-xl flex items-center justify-center p-6" onClick={() => setIsSyncOpen(false)}>
           <div className="bg-white w-full max-w-sm rounded-[44px] p-8 shadow-2xl" onClick={e => e.stopPropagation()}>
-            <h3 className="text-xl font-black text-gray-900 mb-6 tracking-tight">数据同步中心</h3>
-            <div className="space-y-6">
-              <button onClick={handleManualExport} className="w-full py-4 bg-amber-500 text-white rounded-2xl text-[14px] font-black">生成备份代码</button>
-              <textarea 
-                placeholder="粘贴备份代码..." 
-                value={manualCode}
-                onChange={e => setManualCode(e.target.value)}
-                className="w-full h-24 p-4 bg-gray-50 rounded-2xl text-[10px] border-none shadow-inner resize-none"
-              />
-              <button disabled={!manualCode} onClick={handleManualImport} className="w-full py-4 bg-gray-900 text-white rounded-2xl text-[14px] font-black">立即导入数据</button>
+            <h3 className="text-xl font-black text-gray-900 mb-2 tracking-tight">数据备份中心</h3>
+            <p className="text-[11px] text-gray-400 font-medium mb-8 leading-relaxed">
+              将记录导出为文件，或从备份恢复。
+            </p>
+            <div className="space-y-4">
+              <button onClick={handleDownloadBackup} className="w-full py-4.5 bg-indigo-600 text-white rounded-[22px] text-[15px] font-black flex items-center justify-center gap-3 active:scale-95 transition-all shadow-lg shadow-indigo-100">
+                <span>📥 下载备份文件</span>
+              </button>
+              <button onClick={handleUploadClick} className="w-full py-4.5 bg-gray-900 text-white rounded-[22px] text-[15px] font-black flex items-center justify-center gap-3 active:scale-95 transition-all shadow-lg">
+                <span>📤 上传备份同步</span>
+              </button>
+              <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".json" className="hidden" />
             </div>
           </div>
         </div>
@@ -164,11 +197,11 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onGoT
       {downloadConfirm.isOpen && (
         <div className="fixed inset-0 z-[200] bg-black/70 flex items-center justify-center p-8">
           <div className="bg-white w-full max-w-sm rounded-[48px] p-10 text-center">
-            <h3 className="text-2xl font-black text-gray-900 mb-6">确认覆盖？</h3>
-            <p className="text-sm text-gray-400 mb-10 leading-relaxed font-medium">导入新数据会清空本机记录。</p>
+            <h3 className="text-2xl font-black text-gray-900 mb-6">确认覆盖数据？</h3>
+            <p className="text-sm text-gray-400 mb-10 leading-relaxed font-medium">导入此备份将替换现有记录，不可撤销。</p>
             <div className="flex flex-col gap-3">
-              <button onClick={executeDownload} className="w-full py-5 bg-indigo-600 text-white rounded-[24px] font-black">确认同步</button>
-              <button onClick={() => setDownloadConfirm({ isOpen: false, data: null })} className="w-full py-4.5 bg-gray-50 text-gray-400 rounded-[24px]">取消</button>
+              <button onClick={executeDownload} className="w-full py-5 bg-indigo-600 text-white rounded-[24px] font-black active:scale-95">确认同步</button>
+              <button onClick={() => setDownloadConfirm({ isOpen: false, data: null })} className="w-full py-4.5 bg-gray-50 text-gray-400 rounded-[24px] font-bold">取消</button>
             </div>
           </div>
         </div>
