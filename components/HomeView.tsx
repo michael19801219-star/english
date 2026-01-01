@@ -9,9 +9,11 @@ interface HomeViewProps {
   onGoToReview: (tab?: 'summary' | 'details' | 'saved') => void;
   onGoToStats: () => void;
   onUpdateStats: (newStats: UserStats) => void;
+  apiKeyReady: boolean;
+  onSelectKey: () => void;
 }
 
-const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onGoToStats, onUpdateStats }) => {
+const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onGoToStats, onUpdateStats, apiKeyReady, onSelectKey }) => {
   const [count, setCount] = useState(10);
   const [difficulty, setDifficulty] = useState<Difficulty>('中等');
   const [selectedPoints, setSelectedPoints] = useState<string[]>([]);
@@ -64,7 +66,16 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onGoT
       <div className="flex-1 overflow-y-auto px-6 no-scrollbar pb-10">
         <header className="py-8 flex justify-between items-start">
           <div className="flex flex-col">
-            <span className="text-[10px] font-black text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-md uppercase mb-1">周琮钦专属定制版</span>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-[10px] font-black text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-md uppercase">周琮钦专属定制版</span>
+              <button 
+                onClick={onSelectKey}
+                className={`w-6 h-6 flex items-center justify-center rounded-full transition-all ${apiKeyReady ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600 animate-pulse'}`}
+                title="切换 API 项目"
+              >
+                <span className="text-[10px]">{apiKeyReady ? '🛰️' : '⚠️'}</span>
+              </button>
+            </div>
             <h1 className="text-[30px] font-black text-gray-900 leading-[1.1]">英语语法<br/><span className="text-indigo-600">通关大师</span></h1>
             <button onClick={() => setIsSyncOpen(true)} className="mt-4 flex items-center gap-2 px-3 py-1.5 bg-white rounded-full shadow-sm border border-gray-100 active:scale-95 transition-all">
               <span className="text-xs font-bold text-gray-500">💾 数据同步</span>
