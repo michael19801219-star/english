@@ -2,7 +2,7 @@
 export interface Question {
   id: string;
   question: string;
-  translation: string; // 新增：题目中文翻译
+  translation: string;
   options: string[];
   answerIndex: number;
   explanation: string;
@@ -17,7 +17,8 @@ export enum AppState {
   LOADING = 'LOADING',
   QUIZ = 'QUIZ',
   RESULT = 'RESULT',
-  REVIEW = 'REVIEW'
+  REVIEW = 'REVIEW',
+  STATS = 'STATS'
 }
 
 export interface QuizResults {
@@ -36,7 +37,11 @@ export interface WrongQuestion extends Question {
 export interface UserStats {
   wrongCounts: Record<string, number>;
   wrongHistory: WrongQuestion[];
-  savedHistory: WrongQuestion[]; // 新增：收藏本历史
+  savedHistory: WrongQuestion[];
+  // 统计相关
+  totalAnswered: number;
+  totalCorrect: number;
+  dailyProgress: Record<string, number>; // "YYYY-MM-DD" -> count
 }
 
 export interface ChatMessage {

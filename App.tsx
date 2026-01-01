@@ -7,6 +7,7 @@ import QuizView from './components/QuizView';
 import ResultView from './components/ResultView';
 import LoadingView from './components/LoadingView';
 import ReviewView from './components/ReviewView';
+import StatsView from './components/StatsView';
 
 const RECOMMENDED_KEYS = [
   'AIzaSyArjTTl1aJm-OUK2i9J-5CDv0riCHF00Cs',
@@ -20,7 +21,14 @@ const App: React.FC = () => {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [results, setResults] = useState<QuizResults | null>(null);
   const [loadingMsg, setLoadingMsg] = useState('');
-  const [userStats, setUserStats] = useState<UserStats>({ wrongCounts: {}, wrongHistory: [], savedHistory: [] });
+  const [userStats, setUserStats] = useState<UserStats>({ 
+    wrongCounts: {}, 
+    wrongHistory: [], 
+    savedHistory: [],
+    totalAnswered: 0,
+    totalCorrect: 0,
+    dailyProgress: {}
+  });
   const [showQuotaModal, setShowQuotaModal] = useState(false);
   const [showSyncModal, setShowSyncModal] = useState(false);
   const [reviewInitialTab, setReviewInitialTab] = useState<'summary' | 'details' | 'saved'>('summary');
@@ -35,7 +43,10 @@ const App: React.FC = () => {
         setUserStats({
           wrongCounts: parsed.wrongCounts || {},
           wrongHistory: parsed.wrongHistory || [],
-          savedHistory: parsed.savedHistory || []
+          savedHistory: parsed.savedHistory || [],
+          totalAnswered: parsed.totalAnswered || 0,
+          totalCorrect: parsed.totalCorrect || 0,
+          dailyProgress: parsed.dailyProgress || {}
         });
       } catch (e) { console.error(e); }
     }
@@ -69,37 +80,49 @@ const App: React.FC = () => {
   };
 
   const handleAnswerSubmitted = (q: Question, ans: number) => {
-    if (ans !== q.answerIndex) {
-      setUserStats(prev => {
-        const alreadyExists = prev.wrongHistory.some(h => h.question === q.question);
-        if (alreadyExists) return prev;
+    const isCorrect = ans === q.answerIndex;
+    const today = new Date().toISOString().split('T')[0];
 
-        const newCounts = { ...prev.wrongCounts };
-        const pt = q.grammarPoint;
-        newCounts[pt] = (newCounts[pt] || 0) + 1;
-        
-        const newWrong: WrongQuestion = {
-          ...q,
-          userAnswerIndex: ans,
-          timestamp: Date.now()
-        };
-        
-        return {
-          ...prev,
-          wrongCounts: newCounts,
-          wrongHistory: [newWrong, ...prev.wrongHistory].slice(0, 100)
-        };
-      });
-    }
+    setUserStats(prev => {
+      const newDailyProgress = { ...prev.dailyProgress };
+      newDailyProgress[today] = (newDailyProgress[today] || 0) + 1;
+
+      let newState = {
+        ...prev,
+        totalAnswered: prev.totalAnswered + 1,
+        totalCorrect: prev.totalCorrect + (isCorrect ? 1 : 0),
+        dailyProgress: newDailyProgress
+      };
+
+      if (!isCorrect) {
+        const alreadyExists = prev.wrongHistory.some(h => h.question === q.question);
+        if (!alreadyExists) {
+          const newCounts = { ...prev.wrongCounts };
+          const pt = q.grammarPoint;
+          newCounts[pt] = (newCounts[pt] || 0) + 1;
+          
+          const newWrong: WrongQuestion = {
+            ...q,
+            userAnswerIndex: ans,
+            timestamp: Date.now()
+          };
+          
+          newState = {
+            ...newState,
+            wrongCounts: newCounts,
+            wrongHistory: [newWrong, ...prev.wrongHistory].slice(0, 100)
+          };
+        }
+      }
+      return newState;
+    });
   };
 
   const removeWrongQuestion = (timestamp: number) => {
     setUserStats(prev => {
       const target = prev.wrongHistory.find(h => h.timestamp === timestamp);
       const filteredHistory = prev.wrongHistory.filter(h => h.timestamp !== timestamp);
-
       if (filteredHistory.length === prev.wrongHistory.length) return prev;
-
       const newCounts = { ...prev.wrongCounts };
       if (target) {
         const pt = target.grammarPoint;
@@ -108,12 +131,7 @@ const App: React.FC = () => {
           if (newCounts[pt] === 0) delete newCounts[pt];
         }
       }
-
-      return {
-        ...prev,
-        wrongCounts: newCounts,
-        wrongHistory: filteredHistory
-      };
+      return { ...prev, wrongCounts: newCounts, wrongHistory: filteredHistory };
     });
   };
 
@@ -148,15 +166,10 @@ const App: React.FC = () => {
   const finishQuiz = (userAnswers: number[]) => {
     let score = 0;
     const wrongPoints: string[] = [];
-    
     userAnswers.forEach((ans, idx) => {
-      if (ans === questions[idx].answerIndex) {
-        score++;
-      } else {
-        wrongPoints.push(questions[idx].grammarPoint);
-      }
+      if (ans === questions[idx].answerIndex) score++;
+      else wrongPoints.push(questions[idx].grammarPoint);
     });
-
     setResults({ 
       score, 
       total: questions.length, 
@@ -193,7 +206,6 @@ const App: React.FC = () => {
   const importBackup = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
@@ -205,15 +217,10 @@ const App: React.FC = () => {
             alert('数据导入成功！');
             setShowSyncModal(false);
           }
-        } else {
-          alert('无效的备份文件：数据格式不符合要求。');
-        }
-      } catch (err) {
-        alert('解析备份文件失败，请确保文件是有效的 JSON 格式。');
-      }
+        } else alert('无效的备份文件');
+      } catch (err) { alert('解析失败'); }
     };
     reader.readAsText(file);
-    // 重置 input 以允许再次选择同一文件
     event.target.value = '';
   };
 
@@ -224,6 +231,7 @@ const App: React.FC = () => {
           onStart={startQuiz} 
           stats={userStats} 
           onGoToReview={(tab) => { setReviewInitialTab(tab as any || 'summary'); setView(AppState.REVIEW); }} 
+          onGoToStats={() => setView(AppState.STATS)}
           isUsingPersonalKey={isUsingPersonalKey}
           onOpenQuotaModal={() => setShowQuotaModal(true)}
           onOpenSyncModal={() => setShowSyncModal(true)}
@@ -266,90 +274,44 @@ const App: React.FC = () => {
         />
       )}
 
-      {/* API Key Modal */}
+      {view === AppState.STATS && (
+        <StatsView stats={userStats} onBack={() => setView(AppState.HOME)} />
+      )}
+
+      {/* API Key Modal & Sync Modal ... */}
       {showQuotaModal && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-md p-6 animate-fadeIn">
           <div className="bg-white w-full max-w-xs rounded-[40px] p-8 shadow-2xl text-center">
             <h3 className="text-xl font-black mb-4">更新 API Key</h3>
-            
             <div className="mb-6">
-              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3 text-left">推荐备用 Key (点击直接填入)</p>
+              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3 text-left">推荐备用 Key</p>
               <div className="flex flex-col gap-2">
                 {RECOMMENDED_KEYS.map((k, i) => (
-                  <button 
-                    key={i}
-                    onClick={() => handleSaveKey(k)}
-                    className="py-2.5 px-3 bg-indigo-50 text-indigo-600 rounded-xl text-[9px] font-mono truncate border border-indigo-100 active:bg-indigo-100 transition-colors text-left shadow-sm"
-                  >
-                    {k}
-                  </button>
+                  <button key={i} onClick={() => handleSaveKey(k)} className="py-2.5 px-3 bg-indigo-50 text-indigo-600 rounded-xl text-[9px] font-mono truncate border border-indigo-100 active:bg-indigo-100 transition-colors text-left shadow-sm">{k}</button>
                 ))}
               </div>
             </div>
-
-            <div className="relative mb-6">
-              <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-100"></div></div>
-              <div className="relative flex justify-center text-[9px] uppercase font-bold"><span className="bg-white px-2 text-gray-300">或者手动粘贴</span></div>
-            </div>
-
-            <input 
-              type="text"
-              placeholder="粘贴 AIzaSy... 密钥"
-              value={inputKey}
-              onChange={(e) => setInputKey(e.target.value)}
-              className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-2xl text-sm font-mono outline-none mb-4 focus:border-indigo-400 focus:bg-white transition-all"
-            />
-            
-            <button 
-              onClick={() => handleSaveKey(inputKey)}
-              className="w-full py-4.5 bg-indigo-600 text-white rounded-2xl font-black mb-6 shadow-xl shadow-indigo-100 active:scale-95 transition-transform"
-            >
-              确定保存
-            </button>
-            
-            <button 
-              onClick={() => setShowQuotaModal(false)} 
-              className="text-gray-400 font-bold text-xs active:opacity-50"
-            >
-              取消
-            </button>
+            <input type="text" placeholder="粘贴 AIzaSy... 密钥" value={inputKey} onChange={(e) => setInputKey(e.target.value)} className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-2xl text-sm font-mono outline-none mb-4 focus:border-indigo-400 focus:bg-white transition-all"/>
+            <button onClick={() => handleSaveKey(inputKey)} className="w-full py-4.5 bg-indigo-600 text-white rounded-2xl font-black mb-6 shadow-xl shadow-indigo-100 active:scale-95 transition-transform">确定保存</button>
+            <button onClick={() => setShowQuotaModal(false)} className="text-gray-400 font-bold text-xs active:opacity-50">取消</button>
           </div>
         </div>
       )}
 
-      {/* Backup & Sync Modal */}
       {showSyncModal && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-md p-6 animate-fadeIn">
           <div className="bg-white w-full max-w-xs rounded-[40px] p-8 shadow-2xl text-center">
             <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-3xl flex items-center justify-center text-3xl mx-auto mb-4">🔄</div>
             <h3 className="text-xl font-black mb-2 text-gray-900">数据备份与同步</h3>
-            <p className="text-xs text-gray-400 mb-8 font-medium leading-relaxed">通过手动下载/上传备份文件，在不同设备间同步你的练习记录与收藏。</p>
-            
+            <p className="text-xs text-gray-400 mb-8 font-medium leading-relaxed">通过下载/上传备份文件，在不同设备间同步你的练习记录与收藏。</p>
             <div className="flex flex-col gap-3">
-              <button 
-                onClick={exportBackup}
-                className="w-full py-4.5 bg-indigo-600 text-white rounded-2xl font-black shadow-lg shadow-indigo-100 active:scale-95 transition-all flex items-center justify-center gap-2"
-              >
-                <span>📤</span> 导出备份文件
-              </button>
-              
+              <button onClick={exportBackup} className="w-full py-4.5 bg-indigo-600 text-white rounded-2xl font-black shadow-lg shadow-indigo-100 active:scale-95 transition-all flex items-center justify-center gap-2"><span>📤</span> 导出备份文件</button>
               <label className="w-full py-4.5 bg-white border-2 border-gray-100 text-indigo-600 rounded-2xl font-black active:bg-gray-50 transition-all flex items-center justify-center gap-2 cursor-pointer">
-                <input 
-                  type="file" 
-                  accept=".json" 
-                  className="hidden" 
-                  onChange={importBackup}
-                />
+                <input type="file" accept=".json" className="hidden" onChange={importBackup}/>
                 <span>📥</span> 导入备份文件
               </label>
             </div>
-            
-            <button 
-              onClick={() => setShowSyncModal(false)} 
-              className="mt-8 text-gray-400 font-bold text-xs active:opacity-50"
-            >
-              关闭
-            </button>
+            <button onClick={() => setShowSyncModal(false)} className="mt-8 text-gray-400 font-bold text-xs active:opacity-50">关闭</button>
           </div>
         </div>
       )}

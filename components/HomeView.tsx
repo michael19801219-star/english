@@ -6,6 +6,7 @@ interface HomeViewProps {
   onStart: (count: number, difficulty: Difficulty, points: string[]) => void;
   stats: UserStats;
   onGoToReview: (tab?: 'summary' | 'details' | 'saved') => void;
+  onGoToStats: () => void;
   isUsingPersonalKey: boolean;
   onOpenQuotaModal: () => void;
   onOpenSyncModal: () => void;
@@ -15,6 +16,7 @@ const HomeView: React.FC<HomeViewProps> = ({
   onStart, 
   stats, 
   onGoToReview, 
+  onGoToStats,
   isUsingPersonalKey, 
   onOpenQuotaModal,
   onOpenSyncModal
@@ -77,14 +79,23 @@ const HomeView: React.FC<HomeViewProps> = ({
           </div>
         </div>
         
-        <div className="flex gap-2">
+        <div className="flex gap-1.5">
+          <button 
+            onClick={onGoToStats}
+            className="bg-white/90 backdrop-blur-md p-3 rounded-[22px] shadow-sm border border-gray-100 flex flex-col items-center relative active:scale-90 transition-all"
+            title="学习数据"
+          >
+            <span className="text-xl">📊</span>
+            <span className="text-[8px] font-black text-gray-400 mt-1 uppercase tracking-widest">数据</span>
+          </button>
+
           <button 
             onClick={() => onGoToReview('saved')}
-            className="bg-white/90 backdrop-blur-md p-3.5 rounded-[22px] shadow-sm border border-gray-100 flex flex-col items-center relative active:scale-90 transition-all"
+            className="bg-white/90 backdrop-blur-md p-3 rounded-[22px] shadow-sm border border-gray-100 flex flex-col items-center relative active:scale-90 transition-all"
             title="收藏本"
           >
             <span className="text-xl">⭐</span>
-            <span className="text-[8px] font-black text-gray-400 mt-1 uppercase tracking-widest">收藏本</span>
+            <span className="text-[8px] font-black text-gray-400 mt-1 uppercase tracking-widest">收藏</span>
             {stats.savedHistory?.length > 0 && (
               <span className="absolute -top-1 -right-1 bg-amber-500 text-white text-[8px] w-4 h-4 rounded-full flex items-center justify-center border border-white font-black">
                 {stats.savedHistory.length}
@@ -94,10 +105,11 @@ const HomeView: React.FC<HomeViewProps> = ({
 
           <button 
             onClick={() => onGoToReview('details')}
-            className="bg-white/90 backdrop-blur-md p-3.5 rounded-[22px] shadow-sm border border-gray-100 flex flex-col items-center relative active:scale-90 transition-all"
+            className="bg-white/90 backdrop-blur-md p-3 rounded-[22px] shadow-sm border border-gray-100 flex flex-col items-center relative active:scale-90 transition-all"
+            title="错题集"
           >
             <span className="text-xl">📕</span>
-            <span className="text-[8px] font-black text-gray-400 mt-1 uppercase tracking-widest">错题集</span>
+            <span className="text-[8px] font-black text-gray-400 mt-1 uppercase tracking-widest">错题</span>
             {stats.wrongHistory.length > 0 && (
               <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[8px] w-4 h-4 rounded-full flex items-center justify-center border border-white font-black">
                 {stats.wrongHistory.length}
