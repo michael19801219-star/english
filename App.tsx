@@ -11,11 +11,15 @@ import StatsView from './components/StatsView';
 
 // 扩展 window 接口以识别 AI Studio 特有方法
 declare global {
+  interface AIStudio {
+    hasSelectedApiKey: () => Promise<boolean>;
+    outputApiKey: () => string;
+    openSelectKey: () => Promise<void>;
+  }
+
   interface Window {
-    readonly aistudio: {
-      hasSelectedApiKey: () => Promise<boolean>;
-      openSelectKey: () => Promise<void>;
-    };
+    // Fix: Added readonly to match possible existing global declarations
+    readonly aistudio: AIStudio;
   }
 }
 
@@ -26,7 +30,16 @@ const App: React.FC = () => {
   const [loadingMsg, setLoadingMsg] = useState('');
   const [quizStartTime, setQuizStartTime] = useState<number>(0);
   const [isApiKeyReady, setIsApiKeyReady] = useState(false);
+  const [isOpeningDialog, setIsOpeningDialog] = useState(false);
   
+  // Fix: Added missing state variables to handle quiz generation, review navigation, and confirmation dialogs
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [reviewInitialTab, setReviewInitialTab] = useState<'summary' | 'details' | 'saved'>('summary');
+  const [clearConfirm, setClearConfirm] = useState<{ isOpen: boolean; type: 'details' | 'saved' | null }>({
+    isOpen: false,
+    type: null
+  });
+
   // 用于强制触发组件刷新的版本号
   const [keyVersion, setKeyVersion] = useState(0);
   
@@ -64,18 +77,13 @@ const App: React.FC = () => {
     };
   });
 
-  // Persist user stats to localStorage whenever they change
   useEffect(() => {
     localStorage.setItem('gaokao_stats_v5', JSON.stringify(userStats));
   }, [userStats]);
 
-  const [reviewInitialTab, setReviewInitialTab] = useState<'summary' | 'details' | 'saved'>('summary');
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [clearConfirm, setClearConfirm] = useState<{ isOpen: boolean; type: 'details' | 'saved' | null }>({ isOpen: false, type: null });
-
-  // 增强版指纹提取：直接从 process.env.API_KEY 读取
   const refreshApiInfo = useCallback(() => {
-    const key = process.env.API_KEY || '';
+    // 强制从环境变量中读取，避免闭包过时
+    const key = (process.env.API_KEY as string) || '';
     const isPlaceholder = !key || !key.startsWith('AIza');
     
     let hash = 0;
@@ -95,7 +103,6 @@ const App: React.FC = () => {
     });
   }, []);
 
-  // 每次 keyVersion 改变时，重新检查并刷新 API 信息
   useEffect(() => {
     const checkKey = async () => {
       try {
@@ -103,7 +110,7 @@ const App: React.FC = () => {
         setIsApiKeyReady(hasKey);
         refreshApiInfo();
       } catch (e) {
-        setIsApiKeyReady(!!process.env.API_KEY);
+        setIsApiKeyReady(!!(process.env.API_KEY));
         refreshApiInfo();
       }
     };
@@ -111,97 +118,69 @@ const App: React.FC = () => {
   }, [keyVersion, refreshApiInfo]);
 
   const handleSelectKey = async () => {
+    if (isOpeningDialog) return;
+    setIsOpeningDialog(true);
     try {
+      // 启动 AI Studio 项目选择器
       await window.aistudio.openSelectKey();
+      // 选择后，强制增加版本号触发重新读取
       setKeyVersion(v => v + 1);
     } catch (e) {
-      console.error("Select key error", e);
+      console.error("Open Select Key Failed", e);
+    } finally {
+      // 延迟关闭状态，防止连续点击
+      setTimeout(() => setIsOpeningDialog(false), 2000);
     }
   };
 
-  const handleUpdateStats = (newStats: UserStats) => {
-    setUserStats(newStats);
-  };
-
+  const handleUpdateStats = (newStats: UserStats) => setUserStats(newStats);
   const handleGoToReview = (tab?: 'summary' | 'details' | 'saved') => {
+    // Fix: Added state update for review initial tab selection
     if (tab) setReviewInitialTab(tab);
     setView(AppState.REVIEW);
   };
+  const handleGoToStats = () => setView(AppState.STATS);
 
-  const handleGoToStats = () => {
-    setView(AppState.STATS);
-  };
-
-  // Fix: Implement missing handleAnswerSubmitted handler
   const handleAnswerSubmitted = (question: Question, userAnswerIndex: number) => {
     if (userAnswerIndex === question.answerIndex) return;
-
     setUserStats(prev => {
       const point = question.grammarPoint || '通用语法';
       const newWrongCounts = { ...prev.wrongCounts };
       newWrongCounts[point] = (newWrongCounts[point] || 0) + 1;
-
-      const newWrong: WrongQuestion = {
-        ...question,
-        userAnswerIndex,
-        timestamp: Date.now()
-      };
-
-      return {
-        ...prev,
-        wrongCounts: newWrongCounts,
-        wrongHistory: [newWrong, ...prev.wrongHistory].slice(0, 100)
-      };
+      const newWrong: WrongQuestion = { ...question, userAnswerIndex, timestamp: Date.now() };
+      return { ...prev, wrongCounts: newWrongCounts, wrongHistory: [newWrong, ...prev.wrongHistory].slice(0, 100) };
     });
   };
 
-  // Fix: Implement missing toggleSaveQuestion handler
   const toggleSaveQuestion = (question: Question, userAnswerIndex: number) => {
     setUserStats(prev => {
       const isAlreadySaved = prev.savedHistory.some(q => q.question === question.question);
       if (isAlreadySaved) {
-        return {
-          ...prev,
-          savedHistory: prev.savedHistory.filter(q => q.question !== question.question)
-        };
+        return { ...prev, savedHistory: prev.savedHistory.filter(q => q.question !== question.question) };
       } else {
-        const newSaved: WrongQuestion = {
-          ...question,
-          userAnswerIndex,
-          timestamp: Date.now()
-        };
-        return {
-          ...prev,
-          savedHistory: [newSaved, ...prev.savedHistory]
-        };
+        const newSaved: WrongQuestion = { ...question, userAnswerIndex, timestamp: Date.now() };
+        return { ...prev, savedHistory: [newSaved, ...prev.savedHistory] };
       }
     });
   };
 
-  // Fix: Implement missing handleDeleteWrong handler
   const handleDeleteWrong = (timestamp: number) => {
-    setUserStats(prev => ({
-      ...prev,
-      wrongHistory: prev.wrongHistory.filter(q => q.timestamp !== timestamp)
-    }));
+    setUserStats(prev => ({ ...prev, wrongHistory: prev.wrongHistory.filter(q => q.timestamp !== timestamp) }));
   };
 
-  // Fix: Implement missing handleDeleteSaved handler
   const handleDeleteSaved = (timestamp: number) => {
-    setUserStats(prev => ({
-      ...prev,
-      savedHistory: prev.savedHistory.filter(q => q.timestamp !== timestamp)
-    }));
+    setUserStats(prev => ({ ...prev, savedHistory: prev.savedHistory.filter(q => q.timestamp !== timestamp) }));
   };
 
   const startQuiz = useCallback(async (count: number, difficulty: Difficulty, points: string[]) => {
+    // Fix: Prevent multiple concurrent requests
     if (isProcessing) return;
     
     let hasKey = false;
     try {
       hasKey = await window.aistudio.hasSelectedApiKey();
     } catch (e) {
-      hasKey = !!process.env.API_KEY;
+      hasKey = !!(process.env.API_KEY);
     }
 
     if (!hasKey) {
@@ -209,9 +188,10 @@ const App: React.FC = () => {
       return;
     }
 
+    // Fix: Set processing state to true during API call
     setIsProcessing(true);
     setView(AppState.LOADING);
-    setLoadingMsg(`AI 正在定制专属题目，请稍候...`);
+    setLoadingMsg(`正在连接云端 AI 项目，验证指纹...`);
     
     try {
       const newQuestions = await generateGrammarQuestions(count, points, difficulty, (msg) => {
@@ -225,15 +205,16 @@ const App: React.FC = () => {
     } catch (error: any) {
       const errorMsg = error.message || "";
       if (errorMsg.includes("Requested entity was not found")) {
-        alert("项目配置无效。请尝试点击【信号图标】重新关联您的 API 项目。");
+        alert("当前关联的项目似乎已失效或未开通 API。请点击信号灯图标强制重选。");
         setIsApiKeyReady(false);
       } else if (errorMsg.includes("429")) {
-        alert("请求过于频繁。免费项目每分钟仅支持少量请求，请稍后再试。");
+        alert("当前项目已达到今日限额（429）。建议更换另一个项目或稍后再试。");
       } else {
-        alert("出题遇到状况，请尝试更换另一个 API 项目。");
+        alert("启动失败，请确保您已在对话框中勾选了一个有效的 API 项目。");
       }
       setView(AppState.HOME);
     } finally {
+      // Fix: Reset processing state after call completes
       setIsProcessing(false);
     }
   }, [isProcessing]);
@@ -242,39 +223,17 @@ const App: React.FC = () => {
     const now = new Date();
     const dateKey = now.toISOString().split('T')[0];
     const duration = Math.floor((Date.now() - quizStartTime) / 1000);
-
     let score = 0;
     const wrongPoints: string[] = [];
     userAnswers.forEach((ans, idx) => {
       if (ans === questions[idx].answerIndex) score++;
       else wrongPoints.push(questions[idx].grammarPoint);
     });
-
     setUserStats(prev => {
       const currentDaily = prev.dailyStats[dateKey] || { attempted: 0, correct: 0 };
-      return {
-        ...prev,
-        totalQuestionsAttempted: prev.totalQuestionsAttempted + questions.length,
-        totalCorrectAnswers: prev.totalCorrectAnswers + score,
-        totalStudyTime: prev.totalStudyTime + duration,
-        dailyStats: {
-          ...prev.dailyStats,
-          [dateKey]: {
-            attempted: currentDaily.attempted + questions.length,
-            correct: currentDaily.correct + score
-          }
-        }
-      };
+      return { ...prev, totalQuestionsAttempted: prev.totalQuestionsAttempted + questions.length, totalCorrectAnswers: prev.totalCorrectAnswers + score, totalStudyTime: prev.totalStudyTime + duration, dailyStats: { ...prev.dailyStats, [dateKey]: { attempted: currentDaily.attempted + questions.length, correct: currentDaily.correct + score } } };
     });
-
-    setResults({ 
-      score, 
-      total: questions.length, 
-      answers: userAnswers, 
-      questions, 
-      wrongGrammarPoints: Array.from(new Set(wrongPoints)),
-      duration
-    });
+    setResults({ score, total: questions.length, answers: userAnswers, questions, wrongGrammarPoints: Array.from(new Set(wrongPoints)), duration });
     setView(AppState.RESULT);
   };
 
@@ -290,6 +249,7 @@ const App: React.FC = () => {
           apiKeyReady={isApiKeyReady}
           apiInfo={apiInfo}
           onSelectKey={handleSelectKey}
+          isOpeningDialog={isOpeningDialog}
         />
       )}
       {view === AppState.LOADING && <LoadingView message={loadingMsg} onCancel={() => setView(AppState.HOME)} />}
@@ -299,7 +259,7 @@ const App: React.FC = () => {
           onFinish={finishQuiz} 
           onCancel={() => setView(AppState.HOME)} 
           onQuotaError={() => {
-            alert("当前项目频率受限，请更换项目或稍后再试。");
+            alert("请求受限，请更换项目。");
             handleSelectKey();
           }}
           onAnswerSubmitted={handleAnswerSubmitted}
@@ -315,42 +275,32 @@ const App: React.FC = () => {
           history={userStats.wrongHistory} 
           savedHistory={userStats.savedHistory}
           onBack={() => setView(AppState.HOME)} 
+          // Fix: Added clear confirmation handler
           onClear={(type) => setClearConfirm({ isOpen: true, type })} 
           onDeleteWrong={handleDeleteWrong}
           onDeleteSaved={handleDeleteSaved}
           onStartQuiz={(point) => startQuiz(10, '中等', [point])}
+          // Fix: Pass initial tab state to ReviewView
           initialTab={reviewInitialTab}
         />
       )}
-      {view === AppState.STATS && (
-        <StatsView stats={userStats} onBack={() => setView(AppState.HOME)} />
-      )}
+      {view === AppState.STATS && <StatsView stats={userStats} onBack={() => setView(AppState.HOME)} />}
 
-      {/* 引导激活屏幕 */}
       {!isApiKeyReady && view === AppState.HOME && (
-        <div className="fixed inset-0 z-[500] bg-white flex flex-col items-center justify-center p-8 text-center animate-fadeIn overflow-y-auto">
+        <div className="fixed inset-0 z-[500] bg-white flex flex-col items-center justify-center p-8 text-center animate-fadeIn">
           <div className="w-20 h-20 bg-indigo-50 rounded-[30px] flex items-center justify-center text-4xl mb-6 shadow-inner animate-pulse">🛰️</div>
           <h2 className="text-2xl font-black text-gray-900 mb-2">连接 AI 核心</h2>
-          <p className="text-gray-400 text-[13px] mb-8 leading-relaxed px-4 font-medium">
-            为了启动出题服务，请关联一个有效的 API 项目。
-          </p>
-          
+          <p className="text-gray-400 text-sm mb-8 leading-relaxed px-4">为了启动出题服务，请关联您的 API 项目。</p>
           <button 
             onClick={handleSelectKey}
-            className="w-full py-5 bg-indigo-600 text-white rounded-[24px] font-black text-lg shadow-xl shadow-indigo-100 active:scale-95 transition-all mb-6"
+            className={`w-full py-5 rounded-[24px] font-black text-lg shadow-xl transition-all ${isOpeningDialog ? 'bg-gray-400 text-gray-100' : 'bg-indigo-600 text-white active:scale-95'}`}
           >
-            去关联 API 项目
+            {isOpeningDialog ? '正在唤起对话框...' : '关联 API 项目'}
           </button>
-          
-          <div className="p-5 bg-gray-50 rounded-2xl text-left">
-            <p className="text-[10px] text-gray-500 font-bold mb-2 uppercase tracking-widest">操作贴士</p>
-            <p className="text-[12px] text-gray-400 leading-relaxed font-medium">
-              如果您在对话框中看不到项目，请确保已在 AI Studio 创建了项目并开启了 API。
-            </p>
-          </div>
         </div>
       )}
 
+      {/* Fix: Render confirmation dialog when clearConfirm is open */}
       {clearConfirm.isOpen && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/40 backdrop-blur-sm p-6 animate-fadeIn">
           <div className="bg-white w-full max-w-sm rounded-[40px] p-8 shadow-2xl">

@@ -1,7 +1,6 @@
 
 import React, { useState } from 'react';
 import { UserStats, Difficulty, GRAMMAR_POINTS } from '../types';
-import { getManualBackupCode, importFromManualCode } from '../services/syncService';
 
 interface HomeViewProps {
   onStart: (count: number, difficulty: Difficulty, points: string[]) => void;
@@ -17,47 +16,18 @@ interface HomeViewProps {
     lastUpdate: string;
   };
   onSelectKey: () => void;
+  isOpeningDialog?: boolean;
 }
 
-const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onGoToStats, onUpdateStats, apiKeyReady, apiInfo, onSelectKey }) => {
+const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onGoToStats, apiKeyReady, apiInfo, onSelectKey, isOpeningDialog }) => {
   const [count, setCount] = useState(10);
   const [difficulty, setDifficulty] = useState<Difficulty>('中等');
   const [selectedPoints, setSelectedPoints] = useState<string[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isApiStatusOpen, setIsApiStatusOpen] = useState(false);
-  
-  const [isSyncOpen, setIsSyncOpen] = useState(false);
-  const [manualCode, setManualCode] = useState('');
-  const [downloadConfirm, setDownloadConfirm] = useState<{ isOpen: boolean; data: UserStats | null }>({ isOpen: false, data: null });
 
   const togglePoint = (point: string) => {
     setSelectedPoints(prev => prev.includes(point) ? prev.filter(p => p !== point) : [...prev, point]);
-  };
-
-  const handleManualExport = () => {
-    const code = getManualBackupCode(stats);
-    setManualCode(code);
-    navigator.clipboard.writeText(code).then(() => {
-      alert("✅ 备份代码已成功复制！\n请通过微信发送给另一台手机粘贴。");
-    });
-  };
-
-  const handleManualImport = () => {
-    const data = importFromManualCode(manualCode);
-    if (data) {
-      setDownloadConfirm({ isOpen: true, data: data });
-    } else {
-      alert("❌ 备份代码格式无效。");
-    }
-  };
-
-  const executeDownload = () => {
-    if (downloadConfirm.data) {
-      onUpdateStats(downloadConfirm.data);
-      setDownloadConfirm({ isOpen: false, data: null });
-      setIsSyncOpen(false);
-      alert("🎉 离线数据迁移完成！");
-    }
   };
 
   const topWrongPoints = Object.entries(stats.wrongCounts || {})
@@ -163,20 +133,25 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onGoT
 
               <div className={`p-4 rounded-xl border flex flex-col gap-2 ${apiInfo.isPlaceholder ? 'bg-amber-50 border-amber-100' : 'bg-green-50 border-green-100'}`}>
                 <p className="text-[10px] font-bold">
-                  {apiInfo.isPlaceholder ? '💡 提示：当前未关联您的个人项目。请点击下方重试按钮，并确保在对话框中勾选了一个项目。' : '✨ 连接正常！当前的 API 已生效。'}
+                  {apiInfo.isPlaceholder ? '💡 提示：当前未关联您的个人项目。请点击下方重试按钮。' : '✨ 连接正常！当前的 API 已生效。'}
                 </p>
               </div>
             </div>
 
             <div className="flex flex-col gap-2">
               <button 
-                onClick={() => {
-                  onSelectKey();
-                  setIsApiStatusOpen(false);
-                }}
-                className="w-full py-4 bg-gray-900 text-white rounded-2xl font-black shadow-lg active:scale-95 transition-all text-sm"
+                onClick={onSelectKey}
+                disabled={isOpeningDialog}
+                className={`w-full py-4 rounded-2xl font-black shadow-lg transition-all text-sm flex items-center justify-center gap-2 ${isOpeningDialog ? 'bg-gray-400 text-white' : 'bg-gray-900 text-white active:scale-95'}`}
               >
-                🔄 强制重选项目 (推荐)
+                {isOpeningDialog ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    唤起对话框...
+                  </>
+                ) : (
+                  '🔄 强制重选项目 (推荐)'
+                )}
               </button>
               <button onClick={() => setIsApiStatusOpen(false)} className="w-full py-3.5 bg-gray-100 text-gray-500 rounded-2xl font-bold text-sm">关闭</button>
             </div>
