@@ -9,13 +9,22 @@ interface HomeViewProps {
   onGoToReview: (tab?: 'summary' | 'details' | 'saved') => void;
   onGoToStats: () => void;
   onUpdateStats: (newStats: UserStats) => void;
+  apiKeyReady: boolean;
+  apiInfo: {
+    fingerprint: string;
+    uid: string;
+    isPlaceholder: boolean;
+    lastUpdate: string;
+  };
+  onSelectKey: () => void;
 }
 
-const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onGoToStats, onUpdateStats }) => {
+const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onGoToStats, onUpdateStats, apiKeyReady, apiInfo, onSelectKey }) => {
   const [count, setCount] = useState(10);
   const [difficulty, setDifficulty] = useState<Difficulty>('中等');
   const [selectedPoints, setSelectedPoints] = useState<string[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isApiStatusOpen, setIsApiStatusOpen] = useState(false);
   
   const [isSyncOpen, setIsSyncOpen] = useState(false);
   const [manualCode, setManualCode] = useState('');
@@ -64,7 +73,16 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onGoT
       <div className="flex-1 overflow-y-auto px-6 no-scrollbar pb-10">
         <header className="py-8 flex justify-between items-start">
           <div className="flex flex-col">
-            <span className="text-[10px] font-black text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-md uppercase mb-1">周琮钦专属定制版</span>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-[10px] font-black text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-md uppercase">周琮钦专属定制版</span>
+              <button 
+                onClick={() => setIsApiStatusOpen(true)}
+                className={`w-6 h-6 flex items-center justify-center rounded-full transition-all ${apiKeyReady && !apiInfo.isPlaceholder ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600 animate-pulse'}`}
+                title="查看系统状态"
+              >
+                <span className="text-[10px]">{apiKeyReady && !apiInfo.isPlaceholder ? '✅' : '⚠️'}</span>
+              </button>
+            </div>
             <h1 className="text-[30px] font-black text-gray-900 leading-[1.1]">英语语法<br/><span className="text-indigo-600">通关大师</span></h1>
             <button onClick={() => setIsSyncOpen(true)} className="mt-4 flex items-center gap-2 px-3 py-1.5 bg-white rounded-full shadow-sm border border-gray-100 active:scale-95 transition-all">
               <span className="text-xs font-bold text-gray-500">💾 数据同步</span>
@@ -138,6 +156,76 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onGoT
         </div>
       </div>
 
+      {/* 增强型系统状态面板 */}
+      {isApiStatusOpen && (
+        <div className="fixed inset-0 z-[600] bg-black/40 backdrop-blur-sm flex items-center justify-center p-6" onClick={() => setIsApiStatusOpen(false)}>
+          <div className="bg-white w-full max-w-sm rounded-[40px] p-8 shadow-2xl animate-fadeIn overflow-y-auto max-h-[90vh]" onClick={e => e.stopPropagation()}>
+            <div className="text-center mb-6">
+              <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-3 text-2xl shadow-lg transition-colors ${apiInfo.isPlaceholder ? 'bg-red-50 text-red-500' : 'bg-green-50 text-green-500'}`}>
+                {apiInfo.isPlaceholder ? '⚠️' : 'Ready'}
+              </div>
+              <h3 className="text-lg font-black text-gray-900">API 连接诊断</h3>
+            </div>
+            
+            <div className="space-y-3 mb-8">
+              <div className="flex justify-between items-center p-3 bg-gray-50 rounded-xl border border-gray-100">
+                <span className="text-[10px] font-black text-gray-400 uppercase tracking-tighter">当前项目特征</span>
+                <span className={`text-xs font-black px-2 py-1 rounded ${apiInfo.isPlaceholder ? 'bg-gray-200 text-gray-600' : 'bg-indigo-600 text-white'}`}>
+                  {apiInfo.uid}
+                </span>
+              </div>
+              
+              <div className="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
+                <span className="text-[10px] font-black text-gray-400 uppercase tracking-tighter">API 摘要</span>
+                <span className="text-xs font-mono font-bold text-gray-800 tracking-tighter">
+                  {apiInfo.fingerprint}
+                </span>
+              </div>
+
+              <div className={`p-4 rounded-xl border flex flex-col gap-2 ${apiInfo.isPlaceholder ? 'bg-amber-50 border-amber-100' : 'bg-green-50 border-green-100'}`}>
+                <div className="flex justify-between items-center">
+                  <span className="text-[10px] font-black text-gray-500 uppercase">当前状态</span>
+                  <span className={`text-[10px] font-black px-2 py-0.5 rounded ${apiInfo.isPlaceholder ? 'bg-amber-200 text-amber-700' : 'bg-green-200 text-green-700'}`}>
+                    {apiInfo.isPlaceholder ? '未关联个人项目' : '已成功关联'}
+                  </span>
+                </div>
+                {apiInfo.isPlaceholder ? (
+                  <div className="text-[10px] text-amber-700 font-bold space-y-1">
+                    <p>💡 如何使用您的免费 API？</p>
+                    <ul className="list-disc pl-3">
+                      <li>点击下方按钮打开对话框。</li>
+                      <li>从主列表中勾选一个项目。</li>
+                      <li>如果是第一次导入，导入后需<span className="text-indigo-600">退出小窗口</span>再在主列表勾选。</li>
+                    </ul>
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-green-700 font-bold">
+                    ✨ 服务已就绪！您可以正常进行语法通关练习了。
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <button 
+                onClick={() => {
+                  onSelectKey();
+                  setIsApiStatusOpen(false);
+                }}
+                className="w-full py-4 bg-gray-900 text-white rounded-2xl font-black shadow-lg active:scale-95 transition-all text-sm"
+              >
+                🔄 更换/重新关联项目
+              </button>
+              <button onClick={() => setIsApiStatusOpen(false)} className="w-full py-3.5 bg-gray-100 text-gray-500 rounded-2xl font-bold text-sm">关闭面板</button>
+            </div>
+            
+            <p className="text-center text-[8px] text-gray-300 mt-6 font-bold uppercase tracking-widest">
+              Last Check: {apiInfo.lastUpdate}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* 固定底部的操作栏 */}
       <footer className="p-6 bg-white border-t border-gray-100 safe-area-bottom shadow-[0_-10px_30px_-10px_rgba(0,0,0,0.05)]">
         <button onClick={() => onStart(count, difficulty, selectedPoints)} className="w-full bg-indigo-600 text-white py-5 rounded-[28px] font-black text-lg shadow-xl active:scale-95 transition-all">🚀 启动练习</button>
@@ -168,7 +256,7 @@ const HomeView: React.FC<HomeViewProps> = ({ onStart, stats, onGoToReview, onGoT
             <p className="text-sm text-gray-400 mb-10 leading-relaxed font-medium">导入新数据会清空本机记录。</p>
             <div className="flex flex-col gap-3">
               <button onClick={executeDownload} className="w-full py-5 bg-indigo-600 text-white rounded-[24px] font-black">确认同步</button>
-              <button onClick={() => setDownloadConfirm({ isOpen: false, data: null })} className="w-full py-4.5 bg-gray-50 text-gray-400 rounded-[24px]">取消</button>
+              <button onClick={() => setDownloadConfirm({ isOpen: false, data: null })} className="text-gray-400 font-bold mt-4">取消</button>
             </div>
           </div>
         </div>
