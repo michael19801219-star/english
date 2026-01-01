@@ -2,53 +2,10 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Question, Difficulty, ChatMessage, WrongQuestion } from "../types";
 
-// 优先级：本地手动输入的 Key > 环境变量
-const getActiveApiKey = () => {
-  const localKey = localStorage.getItem('user_custom_gemini_key');
-  if (localKey && localKey.startsWith('AIza')) return localKey;
-  return process.env.API_KEY || (window as any).process?.env?.API_KEY || "";
-};
-
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-async function withRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
-  try {
-    return await fn();
-  } catch (error: any) {
-    const errorStr = JSON.stringify(error).toLowerCase();
-    const errorMsg = error.message?.toLowerCase() || "";
-    
-    // 识别密钥失效或过期 (HTTP 400/401/403)
-    if (
-      errorStr.includes('expired') || 
-      errorStr.includes('invalid') || 
-      errorStr.includes('key_invalid') ||
-      errorMsg.includes('expired') ||
-      errorMsg.includes('invalid') ||
-      errorStr.includes('400') ||
-      errorStr.includes('401')
-    ) {
-      throw new Error("KEY_EXPIRED");
-    }
-
-    // 识别配额限制 (HTTP 429)
-    const isQuotaError = errorStr.includes('429') || 
-                        errorStr.includes('quota') || 
-                        errorStr.includes('exhausted') ||
-                        errorMsg.includes('429');
-
-    if (isQuotaError && retries > 0) {
-      const waitTime = (4 - retries) * 2000 + Math.random() * 1000;
-      await delay(waitTime);
-      return withRetry(fn, retries - 1);
-    }
-    
-    if (isQuotaError) throw new Error("QUOTA_EXCEEDED");
-    throw error;
-  }
-}
-
-const TARGET_MODEL = 'gemini-3-flash-preview';
+/**
+ * 强制使用 2.5 Lite 模型 ('gemini-flash-lite-latest')
+ */
+const TEXT_MODEL = 'gemini-flash-lite-latest';
 
 const SCHEMA = {
   type: Type.ARRAY,
@@ -57,41 +14,52 @@ const SCHEMA = {
     properties: {
       id: { type: Type.STRING },
       question: { type: Type.STRING },
+      translation: { type: Type.STRING }, 
       options: { type: Type.ARRAY, items: { type: Type.STRING } },
       answerIndex: { type: Type.INTEGER },
       explanation: { type: Type.STRING },
       grammarPoint: { type: Type.STRING },
       difficulty: { type: Type.STRING }
     },
-    required: ["id", "question", "options", "answerIndex", "explanation", "grammarPoint", "difficulty"]
+    required: ["id", "question", "translation", "options", "answerIndex", "explanation", "grammarPoint", "difficulty"]
   }
 };
 
 export const generateGrammarQuestions = async (
   count: number, 
   targetPoints: string[], 
-  difficulty: Difficulty
+  difficulty: Difficulty,
+  onProgress?: (msg: string) => void
 ): Promise<Question[]> => {
-  return withRetry(async () => {
-    const key = getActiveApiKey();
-    if (!key) throw new Error("KEY_MISSING");
-    
-    const ai = new GoogleGenAI({ apiKey: key });
-    const pointsDesc = targetPoints.length > 0 ? `考点：${targetPoints.join('、')}。` : "涵盖高中考纲。";
-    
-    const prompt = `你是高考命题组长。生成 ${count} 道英语语法单选题。难度：${difficulty}。${pointsDesc}`;
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const pointsDesc = targetPoints.length > 0 ? `重点考察：${targetPoints.join('、')}。` : "涵盖高考核心考点。";
+  
+  if (onProgress) onProgress("AI 正在构思题目...");
 
+  try {
     const response = await ai.models.generateContent({
-      model: TARGET_MODEL,
-      contents: prompt,
+      model: TEXT_MODEL,
+      contents: `生成 ${count} 道单项填空练习题。难度：${difficulty}。${pointsDesc}`,
       config: {
+        systemInstruction: `你是一位高考英语名师。
+        1. 题目语境真实，符合高考逻辑。
+        2. 解析需包含结构分析和关键词提示。
+        3. 必须为题目提供准确的【中文翻译】。
+        4. 仅返回 JSON 数据，严禁包含 Markdown 标记。`,
         responseMimeType: "application/json",
         responseSchema: SCHEMA,
-        temperature: 0.8
+        temperature: 0.4
       }
     });
-    return JSON.parse(response.text || "[]");
-  });
+    
+    const text = response.text || "[]";
+    const data = JSON.parse(text);
+    if (!Array.isArray(data) || data.length === 0) throw new Error("EMPTY_DATA");
+    return data;
+  } catch (e) {
+    console.error("Generate error:", e);
+    throw new Error("GENERATION_FAILED");
+  }
 };
 
 export const askFollowUpQuestion = async (
@@ -99,27 +67,36 @@ export const askFollowUpQuestion = async (
   history: ChatMessage[],
   userQuery: string
 ): Promise<string> => {
-  return withRetry(async () => {
-    const ai = new GoogleGenAI({ apiKey: getActiveApiKey() });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  try {
     const response = await ai.models.generateContent({
-      model: TARGET_MODEL,
-      contents: `题目：${questionContext.question}\n问题：${userQuery}`,
-      config: { temperature: 0.5 }
+      model: TEXT_MODEL,
+      contents: `针对题目的追问："${userQuery}"`,
+      config: { 
+        systemInstruction: `你是英语助教。针对题目: ${questionContext.question}，回答学生疑问。`,
+        temperature: 0.7 
+      }
     });
-    return response.text || "正在思考...";
-  });
+    return response.text || "老师正在组织语言，请再问一遍。";
+  } catch (e) {
+    console.error("Ask error:", e);
+    return "暂时无法连接 AI 助教，请稍后再试。";
+  }
 };
 
 export const getGrammarDeepDive = async (
   pointName: string,
   wrongQuestions: WrongQuestion[]
 ): Promise<{ lecture: string; mistakeAnalysis: string; tips: string[] }> => {
-  return withRetry(async () => {
-    const ai = new GoogleGenAI({ apiKey: getActiveApiKey() });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const context = wrongQuestions.slice(0, 2).map(q => q.question).join('|');
+  
+  try {
     const response = await ai.models.generateContent({
-      model: TARGET_MODEL,
-      contents: `解析考点：${pointName}`,
+      model: TEXT_MODEL,
+      contents: `生成“${pointName}”的精讲。错题案例：${context}`,
       config: {
+        systemInstruction: `输出 JSON 复习讲义：lecture(讲解), mistakeAnalysis(易错点), tips(3个技巧数组)。`,
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -129,9 +106,17 @@ export const getGrammarDeepDive = async (
             tips: { type: Type.ARRAY, items: { type: Type.STRING } }
           },
           required: ["lecture", "mistakeAnalysis", "tips"]
-        }
+        },
+        temperature: 0.2
       }
     });
     return JSON.parse(response.text || "{}");
-  });
+  } catch (e) {
+    console.error("Deep dive error:", e);
+    return {
+      lecture: "暂时无法生成详细讲义。",
+      mistakeAnalysis: "请参考错题集的解析内容。",
+      tips: ["多看例句", "分析句子成分", "背诵核心搭配"]
+    };
+  }
 };

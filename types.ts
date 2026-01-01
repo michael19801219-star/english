@@ -2,6 +2,7 @@
 export interface Question {
   id: string;
   question: string;
+  translation?: string; // 题目中文翻译
   options: string[];
   answerIndex: number;
   explanation: string;
@@ -16,7 +17,8 @@ export enum AppState {
   LOADING = 'LOADING',
   QUIZ = 'QUIZ',
   RESULT = 'RESULT',
-  REVIEW = 'REVIEW'
+  REVIEW = 'REVIEW',
+  STATS = 'STATS'
 }
 
 export interface QuizResults {
@@ -25,6 +27,7 @@ export interface QuizResults {
   answers: number[];
   questions: Question[];
   wrongGrammarPoints: string[];
+  duration: number; // 单次练习时长（秒）
 }
 
 export interface WrongQuestion extends Question {
@@ -32,9 +35,21 @@ export interface WrongQuestion extends Question {
   timestamp: number;
 }
 
+export interface DailyRecord {
+  attempted: number;
+  correct: number;
+}
+
 export interface UserStats {
   wrongCounts: Record<string, number>;
   wrongHistory: WrongQuestion[];
+  savedHistory: WrongQuestion[];
+  totalQuestionsAttempted: number; // 累计总题量
+  totalCorrectAnswers: number;     // 累计总正确数
+  totalStudyTime: number;          // 累计学习时长（秒）
+  dailyStats: Record<string, DailyRecord>; // 每日记录，键为 YYYY-MM-DD
+  syncId?: string;
+  lastSyncTime?: number;
 }
 
 export interface ChatMessage {
