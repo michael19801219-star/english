@@ -42,35 +42,22 @@ const HomeView: React.FC<HomeViewProps> = ({
   const hasWrongStats = sortedWrongEntries.length > 0;
   const topWrongPoint = hasWrongStats ? sortedWrongEntries[0][0] : null;
 
-  // 计算当前历史库中符合条件的题目数量（预览）
-  const getHistoryPreviewCount = () => {
-    const source = historySource === 'wrong' ? stats.wrongHistory : stats.savedHistory;
-    const filtered = source.filter(q => {
-      const matchesPoint = selectedPoints.length === 0 || selectedPoints.includes(q.grammarPoint);
-      const matchesDiff = difficulty === '随机' || q.difficulty === difficulty;
-      return matchesPoint && matchesDiff;
-    });
-    return filtered.length;
-  };
-
   return (
     <div className="flex-1 flex flex-col p-6 overflow-y-auto animate-fadeIn pb-10 relative no-scrollbar">
       <div className="absolute top-[-80px] left-[-40px] w-72 h-72 bg-indigo-200 rounded-full blur-[90px] opacity-30 -z-10"></div>
       
       {/* 顶部状态栏 */}
       <div className="flex justify-center items-center gap-2 mb-4">
-        {mode === 'ai' && (
-          <div 
-            onClick={onOpenQuotaModal}
-            className={`px-3 py-1.5 rounded-full backdrop-blur-md border flex items-center gap-2 cursor-pointer transition-all active:scale-95 ${isUsingPersonalKey ? 'bg-indigo-600 text-white border-indigo-400' : 'bg-white/80 text-gray-500 border-gray-100 shadow-sm'}`}
-          >
-            <span className={`w-1.5 h-1.5 rounded-full ${isUsingPersonalKey ? 'bg-green-400 animate-pulse' : 'bg-gray-300'}`}></span>
-            <span className="text-[10px] font-black uppercase tracking-widest">
-              {isUsingPersonalKey ? '密钥已激活' : '公共模式'}
-            </span>
-            <span className="text-xs">⚙️</span>
-          </div>
-        )}
+        <div 
+          onClick={onOpenQuotaModal}
+          className={`px-4 py-2 rounded-full backdrop-blur-md border flex items-center gap-2 cursor-pointer transition-all active:scale-95 ${isUsingPersonalKey ? 'bg-green-50 text-green-700 border-green-100 shadow-sm' : 'bg-red-50 text-red-600 border-red-100 shadow-sm'}`}
+        >
+          <span className={`w-1.5 h-1.5 rounded-full ${isUsingPersonalKey ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>
+          <span className="text-[10px] font-black uppercase tracking-widest">
+            {isUsingPersonalKey ? 'AI 密钥已连接' : '待配置密钥'}
+          </span>
+          <span className="text-xs">{isUsingPersonalKey ? '✅' : '⚙️'}</span>
+        </div>
 
         <div 
           onClick={onOpenSyncModal}
@@ -88,10 +75,8 @@ const HomeView: React.FC<HomeViewProps> = ({
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 via-indigo-500 to-violet-600">语法大师</span>
           </h1>
           <div className="mt-4 flex gap-2">
-            <div className="flex items-center gap-2 px-4 py-1.5 bg-gradient-to-r from-indigo-500 to-violet-500 rounded-full shadow-lg border border-white/30">
-              <span className="text-[11px] font-black text-white tracking-[0.08em] uppercase drop-shadow-sm">
-                周琮钦专属定制版
-              </span>
+            <div className="flex items-center gap-2 px-4 py-1.5 bg-indigo-50 rounded-full border border-indigo-100">
+              <span className="text-[11px] font-black text-indigo-600 tracking-[0.08em] uppercase">周琮钦专属版</span>
             </div>
           </div>
         </div>
@@ -139,9 +124,6 @@ const HomeView: React.FC<HomeViewProps> = ({
                 ⭐ 收藏本 ({stats.savedHistory.length})
               </button>
             </div>
-            <p className="mt-4 text-[10px] text-amber-600/60 font-bold text-center italic">
-              当前符合筛选条件的本地题目共: {getHistoryPreviewCount()} 道
-            </p>
           </section>
         )}
 
@@ -177,7 +159,7 @@ const HomeView: React.FC<HomeViewProps> = ({
           <div className="p-5 bg-white/50 rounded-[28px] border border-dashed border-gray-200 min-h-[80px] flex items-center">
             {selectedPoints.length === 0 ? (
               <span className="text-[13px] font-bold italic tracking-tight opacity-70 text-gray-400">
-                {mode === 'ai' ? '全真模拟：智能分发核心考点' : '不限：从全库中随机抽取'}
+                {mode === 'ai' ? '智能分发核心考点' : '从选中的库中随机抽取'}
               </span>
             ) : (
               <div className="flex flex-wrap gap-2">
@@ -207,7 +189,7 @@ const HomeView: React.FC<HomeViewProps> = ({
         >
           <span className="text-2xl">{mode === 'ai' ? '🚀' : '🎯'}</span> 
           <span className="tracking-tight">
-            {mode === 'ai' ? `开始${selectedPoints.length === 0 ? '智能' : '专项'}训练` : `开启${historySource === 'wrong' ? '错题' : '收藏'}复习`}
+            {mode === 'ai' ? `开始训练` : `开启复习`}
           </span>
         </button>
       </footer>

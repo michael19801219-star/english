@@ -2,35 +2,23 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Question, Difficulty, ChatMessage, WrongQuestion, GRAMMAR_POINTS } from "../types";
 
-// 获取运行时注入的 API KEY
-const getApiKey = () => {
-  // 优先尝试从 process.env 获取，这是 AI Studio 的注入标准
-  try {
-    return process.env.API_KEY || "";
-  } catch (e) {
-    return "";
-  }
+// 获取激活的 API KEY
+const getActiveApiKey = () => {
+  // 1. 优先尝试从本地持久化存储获取
+  const localKey = localStorage.getItem('user_custom_gemini_key');
+  if (localKey && localKey.startsWith('AIza')) return localKey;
+  
+  // 2. 其次尝试环境注入
+  return process.env.API_KEY || "";
 };
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-async function withRetry<T>(fn: () => Promise<T>, retries = 2): Promise<T> {
+async function withRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
   try {
     return await fn();
   } catch (error: any) {
     const errorStr = JSON.stringify(error).toLowerCase();
-    const message = error.message || "";
-    
-    // 如果是密钥未找到或失效，抛出特定标识
-    if (message.includes("not found") || message.includes("API key not valid") || errorStr.includes("api_key_invalid")) {
-      throw new Error("AUTH_ERROR");
-    }
-    
-    // 网络连接失败（通常是无法访问 googleapis.com）
-    if (message.includes("Failed to fetch") || errorStr.includes("network error")) {
-      throw new Error("NETWORK_ERROR");
-    }
-
     if ((errorStr.includes('429') || errorStr.includes('quota')) && retries > 0) {
       await delay(2000);
       return withRetry(fn, retries - 1);
@@ -54,7 +42,7 @@ const SCHEMA = {
       explanation: { type: Type.STRING },
       grammarPoint: { 
         type: Type.STRING, 
-        description: `必须选一个：${GRAMMAR_POINTS.join('、')}` 
+        description: `必须从以下列表中精确选择一个：${GRAMMAR_POINTS.join('、')}` 
       },
       difficulty: { type: Type.STRING }
     },
@@ -68,13 +56,18 @@ export const generateGrammarQuestions = async (
   difficulty: Difficulty
 ): Promise<Question[]> => {
   return withRetry(async () => {
-    const key = getApiKey();
-    if (!key) throw new Error("AUTH_ERROR");
-
-    const ai = new GoogleGenAI({ apiKey: key });
-    const pointsDesc = targetPoints.length > 0 ? `考点：${targetPoints.join('、')}。` : "高考核心考点。";
+    const key = getActiveApiKey();
+    if (!key) throw new Error("API_KEY_MISSING");
     
-    const prompt = `你是一位高考名师，请生成 ${count} 道英语语法填空单选题。考点限定在：${GRAMMAR_POINTS.join(', ')}。难度：${difficulty}。内容描述：${pointsDesc} 使用纯中文解析。`;
+    const ai = new GoogleGenAI({ apiKey: key });
+    const pointsDesc = targetPoints.length > 0 ? `当前专项考点：${targetPoints.join('、')}。` : "涵盖高考核心考点。";
+    
+    const prompt = `你是一位资深高考英语名师。请生成 ${count} 道英语语法填空选择题。
+    
+    严格要求：
+    1. 【考点对齐】：每道题目的 "grammarPoint" 字段必须严格等于以下列表中的其中一个字符串：
+       ${GRAMMAR_POINTS.join(', ')}
+    2. 【难度】：${difficulty}，内容描述：${pointsDesc}`;
 
     const response = await ai.models.generateContent({
       model: TARGET_MODEL,
@@ -95,45 +88,30 @@ export const askFollowUpQuestion = async (
   userQuery: string
 ): Promise<string> => {
   return withRetry(async () => {
-    const key = getApiKey();
+    const key = getActiveApiKey();
     const ai = new GoogleGenAI({ apiKey: key });
     const response = await ai.models.generateContent({
       model: TARGET_MODEL,
-      contents: `题目：${questionContext.question}\n我的疑问：${userQuery}`,
+      contents: `题目背景：${questionContext.question}\n我的疑问：${userQuery}`,
       config: { 
         temperature: 0.5, 
-        systemInstruction: "你是一位极有耐心的英语老师，请用中文详细解答学生的疑问。" 
+        systemInstruction: "你是一位极其耐心的英语老师，请详细解答学生的疑问。" 
       }
     });
     return response.text || "老师正在组织语言...";
   });
 };
 
-// Fix for error in components/ReviewView.tsx: Module '"../services/geminiService"' has no exported member 'getGrammarDeepDive'.
-// Added getGrammarDeepDive to provide personalized AI analysis of specific grammar points based on a user's wrong questions.
 export const getGrammarDeepDive = async (
-  point: string,
-  questions: WrongQuestion[]
+  pointName: string,
+  wrongQuestions: WrongQuestion[]
 ): Promise<{ lecture: string; mistakeAnalysis: string; tips: string[] }> => {
   return withRetry(async () => {
-    const key = getApiKey();
-    if (!key) throw new Error("AUTH_ERROR");
-
+    const key = getActiveApiKey();
     const ai = new GoogleGenAI({ apiKey: key });
-    
-    // Select a few recent wrong questions to give the AI context for analysis
-    const contextText = questions.slice(0, 5).map(q => 
-      `题目: ${q.question}\n解析: ${q.explanation}`
-    ).join('\n\n');
-
-    const prompt = `你是一位资深高考英语专家。针对考点“${point}”，结合学生以下的典型错题，请生成一份深度学习分析报告：\n\n${contextText}\n\n请按 JSON 格式返回以下字段：
-    1. lecture: 考点精讲（核心语法规则，透彻且易懂）；
-    2. mistakeAnalysis: 错因总结（分析学生为什么容易在这里出错）；
-    3. tips: 提分技巧（实用的做题策略，数组形式，至少提供3条）。`;
-
     const response = await ai.models.generateContent({
       model: TARGET_MODEL,
-      contents: prompt,
+      contents: `考点：${pointName}。分析错题并提供总结讲义。`,
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -141,19 +119,12 @@ export const getGrammarDeepDive = async (
           properties: {
             lecture: { type: Type.STRING },
             mistakeAnalysis: { type: Type.STRING },
-            tips: { 
-              type: Type.ARRAY, 
-              items: { type: Type.STRING } 
-            }
+            tips: { type: Type.ARRAY, items: { type: Type.STRING } }
           },
           required: ["lecture", "mistakeAnalysis", "tips"]
-        },
-        temperature: 0.5
+        }
       }
     });
-
-    const text = response.text;
-    if (!text) throw new Error("EMPTY_RESPONSE");
-    return JSON.parse(text);
+    return JSON.parse(response.text || "{}");
   });
 };

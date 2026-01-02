@@ -9,17 +9,6 @@ import LoadingView from './components/LoadingView';
 import ReviewView from './components/ReviewView';
 import StatsView from './components/StatsView';
 
-declare global {
-  interface AIStudio {
-    hasSelectedApiKey: () => Promise<boolean>;
-    openSelectKey: () => Promise<void>;
-  }
-
-  interface Window {
-    aistudio?: AIStudio;
-  }
-}
-
 const App: React.FC = () => {
   const [view, setView] = useState<AppState>(AppState.HOME);
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -34,14 +23,14 @@ const App: React.FC = () => {
     dailyProgress: {},
     pointAttempts: {}
   });
-  
-  const [keyPickerError, setKeyPickerError] = useState<'AUTH' | 'NETWORK' | null>(null);
-  const [showKeyPickerModal, setShowKeyPickerModal] = useState(false);
+  const [showQuotaModal, setShowQuotaModal] = useState(false);
   const [showSyncModal, setShowSyncModal] = useState(false);
   const [reviewInitialTab, setReviewInitialTab] = useState<'summary' | 'details' | 'saved'>('summary');
-  const [isKeyActive, setIsKeyActive] = useState(false);
+  const [isUsingPersonalKey, setIsUsingPersonalKey] = useState(false);
+  const [inputKey, setInputKey] = useState('');
 
   useEffect(() => {
+    // 加载练习数据
     const saved = localStorage.getItem('gaokao_stats_v3');
     if (saved) {
       try {
@@ -58,31 +47,22 @@ const App: React.FC = () => {
       } catch (e) { console.error(e); }
     }
     
-    const checkStatus = async () => {
-      if (window.aistudio) {
-        const hasKey = await window.aistudio.hasSelectedApiKey();
-        setIsKeyActive(hasKey);
+    // 检查本地密钥
+    const checkKeyStatus = () => {
+      const localKey = localStorage.getItem('user_custom_gemini_key');
+      if (localKey && localKey.startsWith('AIza')) {
+        setIsUsingPersonalKey(true);
+        setInputKey(localKey);
+      } else {
+        setIsUsingPersonalKey(false);
       }
     };
-    checkStatus();
+    checkKeyStatus();
   }, []);
 
   useEffect(() => {
     localStorage.setItem('gaokao_stats_v3', JSON.stringify(userStats));
   }, [userStats]);
-
-  const handleSelectKey = async () => {
-    if (window.aistudio) {
-      try {
-        await window.aistudio.openSelectKey();
-        setIsKeyActive(true);
-        setKeyPickerError(null);
-        setShowKeyPickerModal(false);
-      } catch (e) {
-        console.error("Key selection failed", e);
-      }
-    }
-  };
 
   const normalizePoint = (rawPoint: string): string => {
     if (GRAMMAR_POINTS.includes(rawPoint)) return rawPoint;
@@ -93,6 +73,13 @@ const App: React.FC = () => {
   };
 
   const startQuiz = async (count: number, difficulty: Difficulty, points: string[]) => {
+    // 如果没有配置密钥且没有默认环境密钥，先强制弹出配置框
+    const currentKey = localStorage.getItem('user_custom_gemini_key');
+    if (!currentKey && !process.env.API_KEY) {
+      setShowQuotaModal(true);
+      return;
+    }
+
     setView(AppState.LOADING);
     setLoadingMsg(`正在调取最新高考考点...`);
     try {
@@ -100,14 +87,9 @@ const App: React.FC = () => {
       setQuestions(newQuestions);
       setView(AppState.QUIZ);
     } catch (error: any) {
-      console.error("Quiz Start Error:", error);
+      console.error(error);
       setView(AppState.HOME);
-      if (error.message === 'NETWORK_ERROR') {
-        setKeyPickerError('NETWORK');
-      } else {
-        setKeyPickerError('AUTH');
-      }
-      setShowKeyPickerModal(true);
+      setShowQuotaModal(true);
     }
   };
 
@@ -184,6 +166,26 @@ const App: React.FC = () => {
     setView(AppState.RESULT);
   };
 
+  const handleSaveKey = (key: string) => {
+    const trimmed = key.trim();
+    if (trimmed && trimmed.startsWith('AIza')) {
+      localStorage.setItem('user_custom_gemini_key', trimmed);
+      setIsUsingPersonalKey(true);
+      setInputKey(trimmed);
+      setShowQuotaModal(false);
+      alert('API Key 保存成功！');
+    } else {
+      alert('请输入有效的 Gemini API Key (以 AIza 开头)');
+    }
+  };
+
+  const clearKey = () => {
+    localStorage.removeItem('user_custom_gemini_key');
+    setIsUsingPersonalKey(false);
+    setInputKey('');
+    alert('已清除自定义密钥');
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col max-w-md mx-auto relative overflow-hidden shadow-2xl">
       {view === AppState.HOME && (
@@ -193,8 +195,8 @@ const App: React.FC = () => {
           stats={userStats} 
           onGoToReview={(tab) => { setReviewInitialTab(tab as any || 'summary'); setView(AppState.REVIEW); }} 
           onGoToStats={() => setView(AppState.STATS)}
-          isUsingPersonalKey={isKeyActive}
-          onOpenQuotaModal={() => { setKeyPickerError(null); setShowKeyPickerModal(true); }}
+          isUsingPersonalKey={isUsingPersonalKey}
+          onOpenQuotaModal={() => setShowQuotaModal(true)}
           onOpenSyncModal={() => setShowSyncModal(true)}
         />
       )}
@@ -204,7 +206,7 @@ const App: React.FC = () => {
           questions={questions} 
           onFinish={finishQuiz} 
           onCancel={() => setView(AppState.HOME)} 
-          onQuotaError={() => { setKeyPickerError('AUTH'); setShowKeyPickerModal(true); }}
+          onQuotaError={() => setShowQuotaModal(true)}
           onToggleSave={(q, idx) => {
             const isSaved = userStats.savedHistory.some(s => s.question === q.question);
             if (isSaved) {
@@ -227,28 +229,58 @@ const App: React.FC = () => {
       )}
       {view === AppState.STATS && <StatsView stats={userStats} onBack={() => setView(AppState.HOME)} />}
       
-      {showKeyPickerModal && (
-        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/80 backdrop-blur-md p-6 animate-fadeIn">
+      {showQuotaModal && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-md p-6 animate-fadeIn">
           <div className="bg-white w-full max-w-xs rounded-[40px] p-8 shadow-2xl text-center">
-            <div className={`w-16 h-16 rounded-3xl flex items-center justify-center text-3xl mx-auto mb-4 ${keyPickerError === 'NETWORK' ? 'bg-red-50 text-red-500' : 'bg-indigo-50 text-indigo-600'}`}>
-              {keyPickerError === 'NETWORK' ? '🌐' : '☁️'}
-            </div>
-            <h3 className="text-xl font-black mb-2 text-gray-900">
-              {keyPickerError === 'NETWORK' ? '网络连接受阻' : '配置云端密钥'}
-            </h3>
-            <p className="text-xs text-gray-400 mb-8 font-medium leading-relaxed">
-              {keyPickerError === 'NETWORK' 
-                ? '无法连接到 Google AI 服务。请检查您的网络代理环境（需支持访问 googleapis.com）后重试。' 
-                : '请连接您的 Google Cloud 项目。系统会安全记住您的选择，无需重复输入。'}
+            <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-3xl flex items-center justify-center text-3xl mx-auto mb-4">🔑</div>
+            <h3 className="text-xl font-black mb-2 text-gray-900">自主密钥设置</h3>
+            <p className="text-xs text-gray-400 mb-6 font-medium leading-relaxed">
+              为了确保 AI 服务的稳定，建议使用您自己的 API Key。密钥仅存储在您的设备中。
             </p>
+            
+            <div className="mb-6 text-left">
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-2 px-1">Gemini API Key</label>
+              <div className="relative">
+                <input 
+                  type="text" 
+                  placeholder="AIzaSy..." 
+                  value={inputKey} 
+                  onChange={(e) => setInputKey(e.target.value)} 
+                  className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-2xl text-xs font-mono outline-none focus:border-indigo-400 focus:bg-white transition-all shadow-inner"
+                />
+              </div>
+              <a 
+                href="https://aistudio.google.com/app/apikey" 
+                target="_blank" 
+                rel="noreferrer"
+                className="inline-block mt-3 text-[10px] text-indigo-500 font-bold underline underline-offset-4"
+              >
+                还没有密钥？去 Google 免费申请
+              </a>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <button 
+                onClick={() => handleSaveKey(inputKey)} 
+                className="w-full py-4.5 bg-indigo-600 text-white rounded-2xl font-black shadow-lg shadow-indigo-100 active:scale-95 transition-all"
+              >
+                保存设置
+              </button>
+              {isUsingPersonalKey && (
+                <button 
+                  onClick={clearKey} 
+                  className="w-full py-3 text-red-500 text-[11px] font-black active:opacity-50"
+                >
+                  清除当前密钥
+                </button>
+              )}
+            </div>
             <button 
-              onClick={handleSelectKey} 
-              className="w-full py-5 bg-indigo-600 text-white rounded-[24px] font-black shadow-xl shadow-indigo-100 active:scale-95 transition-all flex items-center justify-center gap-2"
+              onClick={() => setShowQuotaModal(false)} 
+              className="mt-6 text-gray-400 font-bold text-xs active:opacity-50"
             >
-              <span>{keyPickerError === 'NETWORK' ? '🔄' : '✨'}</span> 
-              {keyPickerError === 'NETWORK' ? '重试连接' : '立即连接云项目'}
+              稍后再说
             </button>
-            <button onClick={() => setShowKeyPickerModal(false)} className="mt-6 text-gray-400 font-bold text-xs active:opacity-50">以后再说</button>
           </div>
         </div>
       )}
