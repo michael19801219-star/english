@@ -9,12 +9,17 @@ import LoadingView from './components/LoadingView';
 import ReviewView from './components/ReviewView';
 import StatsView from './components/StatsView';
 
-const RECOMMENDED_KEYS = [
-  'AIzaSyArjTTl1aJm-OUK2i9J-5CDv0riCHF00Cs',
-  'AIzaSyBnDmOI3K3uuJ7qxpfhYgqWjuXysnDq-40',
-  'AIzaSyDm-P8H_Ijbko5Umzj0z7_h97S2qJ4-0Rc',
-  'AIzaSyA0a4jkHp-ElbFzKgsiN0_m6tVCpFu34mM'
-];
+declare global {
+  interface AIStudio {
+    hasSelectedApiKey: () => Promise<boolean>;
+    openSelectKey: () => Promise<void>;
+  }
+
+  interface Window {
+    // FIX: Added optionality modifier to resolve property modifier conflict with global environment
+    aistudio?: AIStudio;
+  }
+}
 
 const App: React.FC = () => {
   const [view, setView] = useState<AppState>(AppState.HOME);
@@ -30,11 +35,10 @@ const App: React.FC = () => {
     dailyProgress: {},
     pointAttempts: {}
   });
-  const [showQuotaModal, setShowQuotaModal] = useState(false);
+  const [showKeyPickerModal, setShowKeyPickerModal] = useState(false);
   const [showSyncModal, setShowSyncModal] = useState(false);
   const [reviewInitialTab, setReviewInitialTab] = useState<'summary' | 'details' | 'saved'>('summary');
-  const [isUsingPersonalKey, setIsUsingPersonalKey] = useState(false);
-  const [inputKey, setInputKey] = useState('');
+  const [isKeyActive, setIsKeyActive] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem('gaokao_stats_v3');
@@ -53,30 +57,33 @@ const App: React.FC = () => {
       } catch (e) { console.error(e); }
     }
     
-    const checkKeyStatus = () => {
-      const localKey = localStorage.getItem('user_custom_gemini_key');
-      setIsUsingPersonalKey(!!localKey);
-      if (localKey) setInputKey(localKey);
+    // 检查云端密钥状态
+    const checkStatus = async () => {
+      if (window.aistudio) {
+        const hasKey = await window.aistudio.hasSelectedApiKey();
+        setIsKeyActive(hasKey);
+      }
     };
-    checkKeyStatus();
+    checkStatus();
   }, []);
 
   useEffect(() => {
     localStorage.setItem('gaokao_stats_v3', JSON.stringify(userStats));
   }, [userStats]);
 
+  const handleSelectKey = async () => {
+    if (window.aistudio) {
+      await window.aistudio.openSelectKey();
+      setIsKeyActive(true);
+      setShowKeyPickerModal(false);
+    }
+  };
+
   const normalizePoint = (rawPoint: string): string => {
     if (GRAMMAR_POINTS.includes(rawPoint)) return rawPoint;
     for (const standard of GRAMMAR_POINTS) {
       if (rawPoint.includes(standard) || standard.includes(rawPoint)) return standard;
     }
-    if (rawPoint.includes('时态') || rawPoint.includes('语态')) return '时态语态';
-    if (rawPoint.includes('虚拟') || rawPoint.includes('语气')) return '情态动词与虚拟语气';
-    if (rawPoint.includes('定语')) return '定语从句';
-    if (rawPoint.includes('名词') || rawPoint.includes('宾语') || rawPoint.includes('主语') || rawPoint.includes('表语')) return '名词性从句';
-    if (rawPoint.includes('非谓语')) return '非谓语动词';
-    if (rawPoint.includes('介词') || rawPoint.includes('冠词')) return '介词冠词';
-    if (rawPoint.includes('代词') || rawPoint.includes('形容词') || rawPoint.includes('副词')) return '代词与形容词副词';
     return GRAMMAR_POINTS[0];
   };
 
@@ -88,16 +95,14 @@ const App: React.FC = () => {
       setQuestions(newQuestions);
       setView(AppState.QUIZ);
     } catch (error: any) {
+      console.error(error);
       setView(AppState.HOME);
-      setShowQuotaModal(true);
+      setShowKeyPickerModal(true); // 报错时提示配置密钥
     }
   };
 
-  // 新增：历史题库训练逻辑
   const startHistoryQuiz = (sourceType: 'wrong' | 'saved', count: number, difficulty: Difficulty, points: string[]) => {
     const source = sourceType === 'wrong' ? userStats.wrongHistory : userStats.savedHistory;
-    
-    // 1. 过滤
     let filtered = source.filter(q => {
       const matchesPoint = points.length === 0 || points.includes(q.grammarPoint);
       const matchesDiff = difficulty === '随机' || q.difficulty === difficulty;
@@ -105,15 +110,12 @@ const App: React.FC = () => {
     });
 
     if (filtered.length === 0) {
-      alert(`当前选中的${sourceType === 'wrong' ? '错题' : '收藏'}库中没有符合条件的题目，请更换筛选条件或增加练习量。`);
+      alert(`当前库中没有符合条件的题目。`);
       return;
     }
 
-    // 2. 打乱并截取
     const shuffled = [...filtered].sort(() => Math.random() - 0.5);
-    const finalQuestions = shuffled.slice(0, count);
-    
-    setQuestions(finalQuestions);
+    setQuestions(shuffled.slice(0, count));
     setView(AppState.QUIZ);
   };
 
@@ -140,54 +142,26 @@ const App: React.FC = () => {
         const newCounts = { ...prev.wrongCounts };
         newCounts[pt] = (newCounts[pt] || 0) + 1;
         const alreadyInHistory = prev.wrongHistory.some(h => h.question === q.question);
-        let newHistory = prev.wrongHistory;
         if (!alreadyInHistory) {
           const newWrong: WrongQuestion = { ...q, userAnswerIndex: ans, timestamp: Date.now() };
-          newHistory = [newWrong, ...prev.wrongHistory].slice(0, 100);
+          newState.wrongHistory = [newWrong, ...prev.wrongHistory].slice(0, 200);
         }
-        newState = { ...newState, wrongCounts: newCounts, wrongHistory: newHistory };
+        newState.wrongCounts = newCounts;
       }
       return newState;
     });
   };
 
   const removeWrongQuestion = (timestamp: number) => {
-    setUserStats(prev => {
-      const target = prev.wrongHistory.find(h => h.timestamp === timestamp);
-      const filteredHistory = prev.wrongHistory.filter(h => h.timestamp !== timestamp);
-      if (filteredHistory.length === prev.wrongHistory.length) return prev;
-      const newCounts = { ...prev.wrongCounts };
-      if (target) {
-        const pt = normalizePoint(target.grammarPoint);
-        if (newCounts[pt] > 0) {
-          newCounts[pt] -= 1;
-          if (newCounts[pt] === 0) delete newCounts[pt];
-        }
-      }
-      return { ...prev, wrongCounts: newCounts, wrongHistory: filteredHistory };
-    });
+    setUserStats(prev => ({ ...prev, wrongHistory: prev.wrongHistory.filter(h => h.timestamp !== timestamp) }));
   };
 
   const removeSavedQuestion = (timestamp: number) => {
     setUserStats(prev => ({ ...prev, savedHistory: prev.savedHistory.filter(h => h.timestamp !== timestamp) }));
   };
 
-  // Added missing clearWrongHistory function
-  const clearWrongHistory = () => {
-    setUserStats(prev => ({
-      ...prev,
-      wrongHistory: [],
-      wrongCounts: {}
-    }));
-  };
-
-  // Added missing clearSavedHistory function
-  const clearSavedHistory = () => {
-    setUserStats(prev => ({
-      ...prev,
-      savedHistory: []
-    }));
-  };
+  const clearWrongHistory = () => setUserStats(prev => ({ ...prev, wrongHistory: [], wrongCounts: {} }));
+  const clearSavedHistory = () => setUserStats(prev => ({ ...prev, savedHistory: [] }));
 
   const finishQuiz = (userAnswers: number[]) => {
     let score = 0;
@@ -200,61 +174,17 @@ const App: React.FC = () => {
     setView(AppState.RESULT);
   };
 
-  const handleSaveKey = (key: string) => {
-    const trimmed = key.trim();
-    if (trimmed) {
-      localStorage.setItem('user_custom_gemini_key', trimmed);
-      setIsUsingPersonalKey(true);
-      setInputKey(trimmed);
-      setShowQuotaModal(false);
-    }
-  };
-
-  const exportBackup = () => {
-    const dataStr = JSON.stringify(userStats, null, 2);
-    const blob = new Blob([dataStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `grammar_master_backup_${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
-
-  const importBackup = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const content = e.target?.result as string;
-        const parsed = JSON.parse(content);
-        if (parsed.wrongCounts && parsed.wrongHistory && parsed.savedHistory) {
-          if (window.confirm('导入备份将覆盖当前所有练习记录，确定吗？')) {
-            setUserStats(parsed);
-            alert('数据导入成功！');
-            setShowSyncModal(false);
-          }
-        } else alert('无效的备份文件');
-      } catch (err) { alert('解析失败'); }
-    };
-    reader.readAsText(file);
-    event.target.value = '';
-  };
-
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col max-w-md mx-auto relative overflow-hidden shadow-2xl">
       {view === AppState.HOME && (
         <HomeView 
           onStart={startQuiz} 
-          onStartHistory={startHistoryQuiz} // 传递新函数
+          onStartHistory={startHistoryQuiz}
           stats={userStats} 
           onGoToReview={(tab) => { setReviewInitialTab(tab as any || 'summary'); setView(AppState.REVIEW); }} 
           onGoToStats={() => setView(AppState.STATS)}
-          isUsingPersonalKey={isUsingPersonalKey}
-          onOpenQuotaModal={() => setShowQuotaModal(true)}
+          isUsingPersonalKey={isKeyActive}
+          onOpenQuotaModal={() => setShowKeyPickerModal(true)}
           onOpenSyncModal={() => setShowSyncModal(true)}
         />
       )}
@@ -264,7 +194,7 @@ const App: React.FC = () => {
           questions={questions} 
           onFinish={finishQuiz} 
           onCancel={() => setView(AppState.HOME)} 
-          onQuotaError={() => setShowQuotaModal(true)}
+          onQuotaError={() => setShowKeyPickerModal(true)}
           onToggleSave={(q, idx) => {
             const isSaved = userStats.savedHistory.some(s => s.question === q.question);
             if (isSaved) {
@@ -272,7 +202,7 @@ const App: React.FC = () => {
               if (target) removeSavedQuestion(target.timestamp);
             } else {
               const newSaved: WrongQuestion = { ...q, userAnswerIndex: idx ?? q.answerIndex, timestamp: Date.now() };
-              setUserStats(prev => ({ ...prev, savedHistory: [newSaved, ...prev.savedHistory].slice(0, 100) }));
+              setUserStats(prev => ({ ...prev, savedHistory: [newSaved, ...prev.savedHistory].slice(0, 200) }));
             }
           }}
           onAnswerSubmitted={handleAnswerSubmitted}
@@ -286,38 +216,22 @@ const App: React.FC = () => {
         <ReviewView history={userStats.wrongHistory} savedHistory={userStats.savedHistory} onBack={() => setView(AppState.HOME)} onClearWrong={clearWrongHistory} onClearSaved={clearSavedHistory} onStartQuiz={(p) => startQuiz(10, '中等', [p])} onRemoveWrong={removeWrongQuestion} onRemoveSaved={removeSavedQuestion} initialTab={reviewInitialTab} />
       )}
       {view === AppState.STATS && <StatsView stats={userStats} onBack={() => setView(AppState.HOME)} />}
-      {showQuotaModal && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-md p-6 animate-fadeIn">
+      
+      {showKeyPickerModal && (
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/80 backdrop-blur-md p-6 animate-fadeIn">
           <div className="bg-white w-full max-w-xs rounded-[40px] p-8 shadow-2xl text-center">
-            <h3 className="text-xl font-black mb-4">更新 API Key</h3>
-            <div className="mb-6">
-              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3 text-left">推荐备用 Key</p>
-              <div className="flex flex-col gap-2">
-                {RECOMMENDED_KEYS.map((k, i) => (
-                  <button key={i} onClick={() => handleSaveKey(k)} className="py-2.5 px-3 bg-indigo-50 text-indigo-600 rounded-xl text-[9px] font-mono truncate border border-indigo-100 active:bg-indigo-100 transition-colors text-left shadow-sm">{k}</button>
-                ))}
-              </div>
-            </div>
-            <input type="text" placeholder="粘贴 AIzaSy... 密钥" value={inputKey} onChange={(e) => setInputKey(e.target.value)} className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-2xl text-sm font-mono outline-none mb-4 focus:border-indigo-400 focus:bg-white transition-all"/>
-            <button onClick={() => handleSaveKey(inputKey)} className="w-full py-4.5 bg-indigo-600 text-white rounded-2xl font-black mb-6 shadow-xl shadow-indigo-100 active:scale-95 transition-transform">确定保存</button>
-            <button onClick={() => setShowQuotaModal(false)} className="text-gray-400 font-bold text-xs active:opacity-50">取消</button>
-          </div>
-        </div>
-      )}
-      {showSyncModal && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-md p-6 animate-fadeIn">
-          <div className="bg-white w-full max-w-xs rounded-[40px] p-8 shadow-2xl text-center">
-            <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-3xl flex items-center justify-center text-3xl mx-auto mb-4">🔄</div>
-            <h3 className="text-xl font-black mb-2 text-gray-900">数据备份与同步</h3>
-            <p className="text-xs text-gray-400 mb-8 font-medium leading-relaxed">通过下载/上传备份文件，在不同设备间同步你的练习记录与收藏。</p>
-            <div className="flex flex-col gap-3">
-              <button onClick={exportBackup} className="w-full py-4.5 bg-indigo-600 text-white rounded-2xl font-black shadow-lg shadow-indigo-100 active:scale-95 transition-all flex items-center justify-center gap-2"><span>📤</span> 导出备份文件</button>
-              <label className="w-full py-4.5 bg-white border-2 border-gray-100 text-indigo-600 rounded-2xl font-black active:bg-gray-50 transition-all flex items-center justify-center gap-2 cursor-pointer">
-                <input type="file" accept=".json" className="hidden" onChange={importBackup}/>
-                <span>📥</span> 导入备份文件
-              </label>
-            </div>
-            <button onClick={() => setShowSyncModal(false)} className="mt-8 text-gray-400 font-bold text-xs active:opacity-50">关闭</button>
+            <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-3xl flex items-center justify-center text-3xl mx-auto mb-4">☁️</div>
+            <h3 className="text-xl font-black mb-2 text-gray-900">配置云端密钥</h3>
+            <p className="text-xs text-gray-400 mb-8 font-medium leading-relaxed">
+              为了避免密钥泄露并获得独立额度，请连接您的 Google Cloud 项目。系统会安全记住您的选择，无需重复输入。
+            </p>
+            <button 
+              onClick={handleSelectKey} 
+              className="w-full py-5 bg-indigo-600 text-white rounded-[24px] font-black shadow-xl shadow-indigo-100 active:scale-95 transition-all flex items-center justify-center gap-2"
+            >
+              <span>✨</span> 立即连接云项目
+            </button>
+            <button onClick={() => setShowKeyPickerModal(false)} className="mt-6 text-gray-400 font-bold text-xs active:opacity-50">以后再说</button>
           </div>
         </div>
       )}
