@@ -16,7 +16,6 @@ declare global {
   }
 
   interface Window {
-    // FIX: Added optionality modifier to resolve property modifier conflict with global environment
     aistudio?: AIStudio;
   }
 }
@@ -35,6 +34,8 @@ const App: React.FC = () => {
     dailyProgress: {},
     pointAttempts: {}
   });
+  
+  const [keyPickerError, setKeyPickerError] = useState<'AUTH' | 'NETWORK' | null>(null);
   const [showKeyPickerModal, setShowKeyPickerModal] = useState(false);
   const [showSyncModal, setShowSyncModal] = useState(false);
   const [reviewInitialTab, setReviewInitialTab] = useState<'summary' | 'details' | 'saved'>('summary');
@@ -57,7 +58,6 @@ const App: React.FC = () => {
       } catch (e) { console.error(e); }
     }
     
-    // 检查云端密钥状态
     const checkStatus = async () => {
       if (window.aistudio) {
         const hasKey = await window.aistudio.hasSelectedApiKey();
@@ -73,9 +73,14 @@ const App: React.FC = () => {
 
   const handleSelectKey = async () => {
     if (window.aistudio) {
-      await window.aistudio.openSelectKey();
-      setIsKeyActive(true);
-      setShowKeyPickerModal(false);
+      try {
+        await window.aistudio.openSelectKey();
+        setIsKeyActive(true);
+        setKeyPickerError(null);
+        setShowKeyPickerModal(false);
+      } catch (e) {
+        console.error("Key selection failed", e);
+      }
     }
   };
 
@@ -95,9 +100,14 @@ const App: React.FC = () => {
       setQuestions(newQuestions);
       setView(AppState.QUIZ);
     } catch (error: any) {
-      console.error(error);
+      console.error("Quiz Start Error:", error);
       setView(AppState.HOME);
-      setShowKeyPickerModal(true); // 报错时提示配置密钥
+      if (error.message === 'NETWORK_ERROR') {
+        setKeyPickerError('NETWORK');
+      } else {
+        setKeyPickerError('AUTH');
+      }
+      setShowKeyPickerModal(true);
     }
   };
 
@@ -184,7 +194,7 @@ const App: React.FC = () => {
           onGoToReview={(tab) => { setReviewInitialTab(tab as any || 'summary'); setView(AppState.REVIEW); }} 
           onGoToStats={() => setView(AppState.STATS)}
           isUsingPersonalKey={isKeyActive}
-          onOpenQuotaModal={() => setShowKeyPickerModal(true)}
+          onOpenQuotaModal={() => { setKeyPickerError(null); setShowKeyPickerModal(true); }}
           onOpenSyncModal={() => setShowSyncModal(true)}
         />
       )}
@@ -194,7 +204,7 @@ const App: React.FC = () => {
           questions={questions} 
           onFinish={finishQuiz} 
           onCancel={() => setView(AppState.HOME)} 
-          onQuotaError={() => setShowKeyPickerModal(true)}
+          onQuotaError={() => { setKeyPickerError('AUTH'); setShowKeyPickerModal(true); }}
           onToggleSave={(q, idx) => {
             const isSaved = userStats.savedHistory.some(s => s.question === q.question);
             if (isSaved) {
@@ -220,16 +230,23 @@ const App: React.FC = () => {
       {showKeyPickerModal && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/80 backdrop-blur-md p-6 animate-fadeIn">
           <div className="bg-white w-full max-w-xs rounded-[40px] p-8 shadow-2xl text-center">
-            <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-3xl flex items-center justify-center text-3xl mx-auto mb-4">☁️</div>
-            <h3 className="text-xl font-black mb-2 text-gray-900">配置云端密钥</h3>
+            <div className={`w-16 h-16 rounded-3xl flex items-center justify-center text-3xl mx-auto mb-4 ${keyPickerError === 'NETWORK' ? 'bg-red-50 text-red-500' : 'bg-indigo-50 text-indigo-600'}`}>
+              {keyPickerError === 'NETWORK' ? '🌐' : '☁️'}
+            </div>
+            <h3 className="text-xl font-black mb-2 text-gray-900">
+              {keyPickerError === 'NETWORK' ? '网络连接受阻' : '配置云端密钥'}
+            </h3>
             <p className="text-xs text-gray-400 mb-8 font-medium leading-relaxed">
-              为了避免密钥泄露并获得独立额度，请连接您的 Google Cloud 项目。系统会安全记住您的选择，无需重复输入。
+              {keyPickerError === 'NETWORK' 
+                ? '无法连接到 Google AI 服务。请检查您的网络代理环境（需支持访问 googleapis.com）后重试。' 
+                : '请连接您的 Google Cloud 项目。系统会安全记住您的选择，无需重复输入。'}
             </p>
             <button 
               onClick={handleSelectKey} 
               className="w-full py-5 bg-indigo-600 text-white rounded-[24px] font-black shadow-xl shadow-indigo-100 active:scale-95 transition-all flex items-center justify-center gap-2"
             >
-              <span>✨</span> 立即连接云项目
+              <span>{keyPickerError === 'NETWORK' ? '🔄' : '✨'}</span> 
+              {keyPickerError === 'NETWORK' ? '重试连接' : '立即连接云项目'}
             </button>
             <button onClick={() => setShowKeyPickerModal(false)} className="mt-6 text-gray-400 font-bold text-xs active:opacity-50">以后再说</button>
           </div>
