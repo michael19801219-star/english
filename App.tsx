@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { AppState, Question, QuizResults, UserStats, Difficulty, WrongQuestion, GRAMMAR_POINTS } from './types';
 import { generateGrammarQuestions } from './services/geminiService';
 import HomeView from './components/HomeView';
@@ -28,9 +28,10 @@ const App: React.FC = () => {
   const [reviewInitialTab, setReviewInitialTab] = useState<'summary' | 'details' | 'saved'>('summary');
   const [isUsingPersonalKey, setIsUsingPersonalKey] = useState(false);
   const [inputKey, setInputKey] = useState('');
+  
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    // 加载练习数据
     const saved = localStorage.getItem('gaokao_stats_v3');
     if (saved) {
       try {
@@ -47,7 +48,6 @@ const App: React.FC = () => {
       } catch (e) { console.error(e); }
     }
     
-    // 检查本地密钥
     const checkKeyStatus = () => {
       const localKey = localStorage.getItem('user_custom_gemini_key');
       if (localKey && localKey.startsWith('AIza')) {
@@ -73,7 +73,6 @@ const App: React.FC = () => {
   };
 
   const startQuiz = async (count: number, difficulty: Difficulty, points: string[]) => {
-    // 如果没有配置密钥且没有默认环境密钥，先强制弹出配置框
     const currentKey = localStorage.getItem('user_custom_gemini_key');
     if (!currentKey && !process.env.API_KEY) {
       setShowQuotaModal(true);
@@ -186,6 +185,51 @@ const App: React.FC = () => {
     alert('已清除自定义密钥');
   };
 
+  // 导出备份文件逻辑
+  const handleExportFile = () => {
+    try {
+      const dataStr = JSON.stringify(userStats, null, 2);
+      const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+      
+      const exportFileDefaultName = `gaokao_grammar_backup_${new Date().toISOString().split('T')[0]}.json`;
+      
+      const linkElement = document.createElement('a');
+      linkElement.setAttribute('href', dataUri);
+      linkElement.setAttribute('download', exportFileDefaultName);
+      linkElement.click();
+    } catch (e) {
+      alert('导出失败，请重试');
+    }
+  };
+
+  // 导入备份文件逻辑
+  const handleImportFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const content = e.target?.result as string;
+        const parsed = JSON.parse(content);
+        
+        // 验证关键字段
+        if (parsed.wrongCounts && Array.isArray(parsed.wrongHistory)) {
+          setUserStats(parsed);
+          alert('数据同步成功！');
+          setShowSyncModal(false);
+        } else {
+          throw new Error('格式不正确');
+        }
+      } catch (err) {
+        alert('文件格式错误或已损坏，请选择正确的备份文件。');
+      }
+    };
+    reader.readAsText(file);
+    // 重置 input 以便下次选择同一文件
+    event.target.value = '';
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col max-w-md mx-auto relative overflow-hidden shadow-2xl">
       {view === AppState.HOME && (
@@ -229,6 +273,15 @@ const App: React.FC = () => {
       )}
       {view === AppState.STATS && <StatsView stats={userStats} onBack={() => setView(AppState.HOME)} />}
       
+      {/* 隐藏的文件选择器 */}
+      <input 
+        type="file" 
+        ref={fileInputRef} 
+        onChange={handleImportFile} 
+        accept=".json" 
+        style={{ display: 'none' }} 
+      />
+
       {showQuotaModal && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-md p-6 animate-fadeIn">
           <div className="bg-white w-full max-w-xs rounded-[40px] p-8 shadow-2xl text-center">
@@ -281,6 +334,52 @@ const App: React.FC = () => {
             >
               稍后再说
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* 备份同步弹窗 - 根据参考图修复 */}
+      {showSyncModal && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 backdrop-blur-sm p-6 animate-fadeIn">
+          <div className="bg-white w-full max-w-xs rounded-[40px] p-10 shadow-[0_32px_80px_rgba(0,0,0,0.15)] text-center relative overflow-hidden">
+            {/* 装饰性背景 */}
+            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-48 bg-indigo-50 rounded-full blur-3xl opacity-50 -mt-24"></div>
+            
+            <div className="relative z-10">
+              <div className="w-20 h-20 bg-indigo-50 text-indigo-500 rounded-[28px] flex items-center justify-center text-4xl mx-auto mb-8 shadow-sm">
+                <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </div>
+              
+              <h3 className="text-[22px] font-black mb-3 text-gray-900 tracking-tight">数据备份与同步</h3>
+              <p className="text-[13px] text-gray-400 mb-10 font-medium leading-relaxed px-2">
+                通过下载/上传备份文件，在不同设备间同步你的练习记录与收藏。
+              </p>
+
+              <div className="flex flex-col gap-4">
+                <button 
+                  onClick={handleExportFile}
+                  className="w-full py-4.5 bg-indigo-600 text-white rounded-[24px] font-black text-sm shadow-[0_20px_40px_rgba(79,70,229,0.3)] active:scale-95 transition-all flex items-center justify-center gap-3"
+                >
+                  <span className="text-lg">📤</span> 导出备份文件
+                </button>
+                
+                <button 
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full py-4.5 bg-white text-indigo-600 border-2 border-indigo-50 rounded-[24px] font-black text-sm active:scale-95 active:bg-indigo-50 transition-all flex items-center justify-center gap-3"
+                >
+                  <span className="text-lg">📥</span> 导入备份文件
+                </button>
+              </div>
+
+              <button 
+                onClick={() => setShowSyncModal(false)} 
+                className="mt-10 text-gray-400 font-bold text-xs tracking-widest active:opacity-50"
+              >
+                关闭
+              </button>
+            </div>
           </div>
         </div>
       )}
